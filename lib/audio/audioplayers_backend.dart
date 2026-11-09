@@ -2,10 +2,18 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
 
 import 'audio_service.dart';
+import 'gapless_music.dart';
 
 /// [AudioBackend] built on the `audioplayers` package (iOS + Android).
 /// All assets are bundled, so audio works offline.
+///
+/// Music on iOS goes through [GaplessMusic] (AVAudioPlayer, sample-accurate
+/// loop); elsewhere, or if that fails, through audioplayers (on Android its
+/// loop is MediaPlayer.isLooping, which loops natively).
 class AudioplayersBackend implements AudioBackend {
+  AudioplayersBackend({GaplessMusic? gapless}) : _gapless = gapless ?? GaplessMusic();
+
+  final GaplessMusic _gapless;
   final Map<String, AudioPool> _pools = {};
   AudioPlayer? _music;
 
@@ -81,6 +89,7 @@ class AudioplayersBackend implements AudioBackend {
   @override
   Future<bool> startMusic(String asset, double volume) async {
     if (!await _exists(asset)) return false;
+    if (await _gapless.start(asset, volume)) return true;
     final player = _music ??= AudioPlayer(playerId: 'music');
     await player.setReleaseMode(ReleaseMode.loop);
     await player.setVolume(volume);
@@ -89,19 +98,21 @@ class AudioplayersBackend implements AudioBackend {
   }
 
   @override
-  Future<void> setMusicVolume(double volume) async => _music?.setVolume(volume);
+  Future<void> setMusicVolume(double volume) async =>
+      _gapless.isActive ? _gapless.setVolume(volume) : _music?.setVolume(volume);
 
   @override
-  Future<void> pauseMusic() async => _music?.pause();
+  Future<void> pauseMusic() async => _gapless.isActive ? _gapless.pause() : _music?.pause();
 
   @override
-  Future<void> resumeMusic() async => _music?.resume();
+  Future<void> resumeMusic() async => _gapless.isActive ? _gapless.resume() : _music?.resume();
 
   @override
   Future<void> dispose() async {
     for (final pool in _pools.values) {
       await pool.dispose();
     }
+    await _gapless.stop();
     await _music?.dispose();
   }
 }

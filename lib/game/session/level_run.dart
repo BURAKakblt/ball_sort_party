@@ -16,16 +16,30 @@ class LevelRun {
     required this.moveCount,
     required this.extraBottlesAdded,
     this.failReason,
+    this.failId,
+    this.levelSig,
   });
 
-  factory LevelRun.fromEngine(GameEngine engine, LevelStatus status, {BoardStatus? failReason}) {
+  /// Signature of a level's starting layout. Saved with every attempt so an
+  /// attempt never resumes on a level whose layout changed in an update.
+  static String signatureOf(List<String> layout) => layout.join('|');
+
+  factory LevelRun.fromEngine(
+    GameEngine engine,
+    LevelStatus status, {
+    BoardStatus? failReason,
+    String? failId,
+  }) {
+    final failed = status == LevelStatus.failed;
     return LevelRun(
       status: status,
       layout: engine.state.toLayout(),
       history: engine.history,
       moveCount: engine.moveCount,
       extraBottlesAdded: engine.extraBottlesAdded,
-      failReason: status == LevelStatus.failed ? failReason : null,
+      failReason: failed ? failReason : null,
+      failId: failed ? failId : null,
+      levelSig: signatureOf(engine.initialState.toLayout()),
     );
   }
 
@@ -38,6 +52,13 @@ class LevelRun {
   /// Why the attempt failed (deadlock / unsolvable), when FAILED.
   final BoardStatus? failReason;
 
+  /// Unique id of this failure; rescue purchases use it for idempotency.
+  final String? failId;
+
+  /// [signatureOf] the level layout this attempt started from (null in saves
+  /// written before this field existed).
+  final String? levelSig;
+
   bool get isFailed => status == LevelStatus.failed;
 
   LevelRun copyWith({LevelStatus? status, BoardStatus? failReason}) => LevelRun(
@@ -47,6 +68,8 @@ class LevelRun {
     moveCount: moveCount,
     extraBottlesAdded: extraBottlesAdded,
     failReason: failReason ?? this.failReason,
+    failId: failId,
+    levelSig: levelSig,
   );
 
   /// Rebuilds the engine for [level].
@@ -71,7 +94,16 @@ class LevelRun {
       if (balls(state) != balls(start)) return false;
       if (history.any((m) => m.from >= state.bottleCount || m.to >= state.bottleCount)) return false;
       if (moveCount < 0 || state.isSolved) return false;
-      return true;
+      if (levelSig != null) return levelSig == signatureOf(level.layout);
+      // Older save without a signature: accept only if undoing its history
+      // leads back exactly to this level's start (proves same layout).
+      var back = state;
+      for (final m in history.reversed) {
+        if (back.isEmpty(m.to)) return false;
+        back = back.transferUnchecked(m.to, m.from);
+      }
+      final expected = [...level.layout, for (var i = 0; i < extraBottlesAdded; i++) ''];
+      return back.toLayout().join('|') == expected.join('|');
     } catch (_) {
       return false;
     }
@@ -84,6 +116,8 @@ class LevelRun {
     'history': [for (final m in history) [m.from, m.to]],
     'moves': moveCount,
     'extra': extraBottlesAdded,
+    if (failId != null) 'failId': failId,
+    if (levelSig != null) 'sig': levelSig,
   };
 
   static LevelRun? fromJson(Object? json) {
@@ -102,6 +136,8 @@ class LevelRun {
         ],
         moveCount: (json['moves'] as num).toInt(),
         extraBottlesAdded: (json['extra'] as num).toInt(),
+        failId: json['failId'] as String?,
+        levelSig: json['sig'] as String?,
       );
     } catch (_) {
       return null;

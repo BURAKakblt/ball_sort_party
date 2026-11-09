@@ -1,7 +1,10 @@
 import 'package:ball_sort_party/app.dart';
 import 'package:ball_sort_party/data/player_progress.dart';
 import 'package:ball_sort_party/game/levels/level_data.dart';
+import 'package:ball_sort_party/game/engine/failure_monitor.dart';
 import 'package:ball_sort_party/screens/game/game_screen.dart';
+import 'package:ball_sort_party/screens/game/level_complete_overlay.dart';
+import 'package:ball_sort_party/screens/game/rescue_overlay.dart';
 import 'package:ball_sort_party/screens/game/out_of_lives_screen.dart';
 import 'package:ball_sort_party/screens/settings/settings_screen.dart';
 import 'package:flutter/material.dart';
@@ -93,5 +96,47 @@ void main() {
     final reloaded = await PlayerProgress.load();
     expect(reloaded.musicOn, isFalse);
     expect(reloaded.soundOn, isFalse);
+  });
+
+  testWidgets('tutorial, rescue and win overlays fit a 320x568 screen', (tester) async {
+    final p = await _progress();
+    await _pump(tester, const Size(320, 568), GameScreen(level: kLevels.first), p);
+    expect(find.textContaining('futbol topu'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await _pump(
+      tester,
+      const Size(320, 568),
+      Scaffold(
+        body: RescueOverlay(
+          status: BoardStatus.unsolvable,
+          canUndo: true,
+          canAddBottle: true,
+          adReady: false,
+          onUndo: () {},
+          onCoinRescue: () {},
+          onAdRescue: () {},
+          onRetry: () {},
+          onOutOfLives: () {},
+          onHome: () {},
+        ),
+      ),
+      p,
+    );
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('ÇÖZÜM KALMADI!'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await _pump(
+      tester,
+      const Size(320, 568),
+      Scaffold(
+        body: LevelCompleteOverlay(level: kLevels.last, stars: 3, coins: 50, moves: 15, onReplay: () {}),
+      ),
+      p,
+    );
+    await tester.pump(const Duration(seconds: 4));
+    expect(find.text('TEBRİKLER!'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

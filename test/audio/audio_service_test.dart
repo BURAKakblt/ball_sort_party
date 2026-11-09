@@ -186,7 +186,12 @@ void main() {
   });
 
   test('all referenced audio assets exist on disk', () {
-    final files = [AudioService.musicAsset, ...AudioService.sfxAssets.values, ...AudioService.landAssets.values];
+    final files = [
+      AudioService.musicAsset,
+      ...AudioService.sfxAssets.values,
+      ...AudioService.landAssets.values,
+      ...AudioService.landSingleAssets.values,
+    ];
     for (final f in files) {
       expect(File('assets/$f').existsSync(), isTrue, reason: f);
       expect(File('assets/$f').lengthSync(), greaterThan(1000), reason: '$f is not empty');
@@ -292,4 +297,46 @@ void main() {
     expect(seam, lessThan(typicalStep * 2), reason: 'no click when looping');
     expect(n / 22050, closeTo(38.4, 0.01), reason: 'exactly 16 bars at 100 BPM');
   });
+
+  test('reduce motion plays the single-impact landing for every ball', () async {
+    await setup();
+    progress.setReduceMotion(true);
+    for (final t in BallType.values) {
+      now = now.add(const Duration(seconds: 1));
+      audio.playLand(t);
+      expect(backend.calls.last, startsWith('sfx:${AudioService.landSingleAssets[t]}'));
+    }
+    progress.setReduceMotion(false);
+    now = now.add(const Duration(seconds: 1));
+    audio.playLand(BallType.tennis);
+    expect(backend.calls.last, startsWith('sfx:${AudioService.landAssets[BallType.tennis]}'));
+  });
+
+  test('single-impact sounds contain no rebound taps (audio matches calm animation)', () {
+    expect(LandingProfile.calm.bounces, isEmpty);
+    for (final t in BallType.values) {
+      final full = _envelope('assets/${AudioService.landAssets[t]}');
+      final single = _envelope('assets/${AudioService.landSingleAssets[t]}');
+      // Ends before the first rebound of the full version would happen.
+      final firstRebound = LandingProfile.byType[t]!.bounceTime;
+      expect(single.length, lessThanOrEqualTo(firstRebound * 44100 + 1), reason: '$t length');
+      // Energy decays monotonically after the attack: no second hit.
+      final peaks = _windowPeaks(single, 441); // 10 ms windows
+      final top = peaks.indexOf(peaks.reduce(math.max));
+      for (var i = top + 2; i < peaks.length; i++) {
+        expect(peaks[i], lessThanOrEqualTo(peaks[i - 2] * 1.15 + 50), reason: '$t re-hit at ${i * 10} ms');
+      }
+      expect(full.length, greaterThan(single.length));
+    }
+  });
 }
+
+List<int> _envelope(String path) {
+  final bytes = File(path).readAsBytesSync();
+  final data = ByteData.sublistView(bytes, 44);
+  return [for (var i = 0; i < data.lengthInBytes ~/ 2; i++) data.getInt16(i * 2, Endian.little).abs()];
+}
+
+List<int> _windowPeaks(List<int> s, int w) => [
+  for (var i = 0; i < s.length; i += w) s.sublist(i, math.min(s.length, i + w)).reduce(math.max),
+];

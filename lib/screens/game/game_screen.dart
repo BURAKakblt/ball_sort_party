@@ -52,7 +52,10 @@ class _GameScreenState extends State<GameScreen> {
         setState(() {});
       },
       onInvalid: _onInvalid,
-      onSelected: () => _audio.play(Sfx.select),
+      onSelected: () {
+        _audio.play(Sfx.select);
+        if (widget.level.number == 1) setState(() {}); // tutorial step
+      },
       onBallLanded: _audio.playLand,
       onBottleCompleted: () => _audio.play(Sfx.bottleComplete),
       onWinStarted: _monitor.invalidate,
@@ -83,6 +86,9 @@ class _GameScreenState extends State<GameScreen> {
     if (_session.isFailed) {
       // Leaving / closing the app never clears FAILED: show the rescue again.
       _rescue = _session.failReason ?? BoardStatus.deadlock;
+      // If the app closed right after a paid rescue, the saved board may be
+      // playable already: verify instead of trusting the flag blindly.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _afterRescueAction(quiet: true));
     } else if (_session.hasProgress) {
       // The player may have left before the last failure check finished.
       WidgetsBinding.instance.addPostFrameCallback((_) => _checkFailure());
@@ -139,12 +145,13 @@ class _GameScreenState extends State<GameScreen> {
 
   /// After undo / coins / ad changed a FAILED board: recover only if the
   /// board is playable again; otherwise stay FAILED and keep the rescue open.
-  Future<void> _afterRescueAction() async {
+  Future<void> _afterRescueAction({bool quiet = false}) async {
     if (!_session.isFailed) return _closeRescue();
     _monitor.invalidate();
     final status = await _analyzer.evaluate(_engine.state);
-    if (!mounted) return;
+    if (!mounted || !_session.isFailed) return;
     if (status == BoardStatus.deadlock || status == BoardStatus.unsolvable) {
+      if (quiet) return;
       // Still FAILED (the changed board was already saved as FAILED).
       showToast(context, 'Hâlâ çözüm yok — bir hamle daha geri alabilirsin');
       setState(() {
@@ -271,8 +278,9 @@ class _GameScreenState extends State<GameScreen> {
     if (!ok) return;
     if (_rescueBusy) return;
     _rescueBusy = true;
-    // Atomic: coins are deducted only if the bottle was actually added.
-    if (_progress.spend(EconomyConfig.rescueWithCoinsPrice, _game.addExtraBottle)) {
+    // One atomic, idempotent write: coins + extra bottle + saved board.
+    final result = _session.paidRescue(EconomyConfig.rescueWithCoinsPrice, _game.addExtraBottle);
+    if (result == PurchaseResult.success) {
       _audio.play(Sfx.purchase);
       await _afterRescueAction();
     }
@@ -398,6 +406,8 @@ class _GameScreenState extends State<GameScreen> {
                     onPause: _pause,
                     onSettings: _openSettings,
                   ),
+                  if (widget.level.number == 1 && !_won)
+                    _TutorialHint(moves: _engine.moveCount, selected: _engine.selected != null),
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -590,6 +600,42 @@ class _PowerUpBar extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Step-by-step hint shown on level 1.
+class _TutorialHint extends StatelessWidget {
+  const _TutorialHint({required this.moves, required this.selected});
+
+  final int moves;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, text) = switch ((moves, selected)) {
+      (0, false) => (Icons.touch_app_rounded, 'En üstünde futbol topu olan şişeye dokun: top yükselir.'),
+      (_, true) => (Icons.south_rounded, 'Şimdi boş şişeye ya da aynı topun üstüne dokun.'),
+      (1 || 2, false) => (Icons.thumb_up_alt_rounded, 'Harika! Aynı türdeki 4 topu aynı şişede topla.'),
+      _ => (Icons.emoji_events_rounded, 'Az kaldı! Son topları da yerine koy.'),
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        child: GlassPanel(
+          key: ValueKey(text),
+          highlight: AppColors.turquoise,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: [
+              Icon(icon, color: AppColors.turquoise, size: 26),
+              const SizedBox(width: 10),
+              Expanded(child: Text(text, style: AppText.label.copyWith(fontSize: 14))),
+            ],
+          ),
+        ),
       ),
     );
   }

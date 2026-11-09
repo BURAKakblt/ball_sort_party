@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import 'package:ball_sort_party/data/economy_config.dart';
 import 'package:ball_sort_party/data/player_progress.dart';
+import 'package:ball_sort_party/data/progress_store.dart';
 import 'package:ball_sort_party/game/engine/failure_monitor.dart';
+import 'package:ball_sort_party/game/levels/level.dart';
 import 'package:ball_sort_party/game/levels/level_data.dart';
 import 'package:ball_sort_party/game/session/level_run.dart';
 import 'package:ball_sort_party/game/session/level_session.dart';
@@ -205,4 +207,41 @@ void main() {
     expect(p.runFor(2), isNull);
     expect(LevelSession(level1, p).status, LevelStatus.playing);
   });
+
+  group('saved attempts after a level layout update', () {
+    test('new saves carry the level signature and reject a changed level', () async {
+      final p = await fresh();
+      final s = LevelSession(level1, p);
+      final m = s.engine.state.validMoves().first;
+      s.engine.move(m.from, m.to);
+      s.save();
+      final run = p.runFor(1)!;
+      expect(run.levelSig, LevelRun.signatureOf(level1.layout));
+      expect(run.isValidFor(level1), isTrue);
+      final changed = Level(number: 1, par: 3, layout: [...level1.layout.reversed]);
+      expect(run.isValidFor(changed), isFalse);
+    });
+
+    test('legacy save (no signature) is kept only if its history leads to the level start', () {
+      final s = LevelSession(level1, PlayerProgress.withStore(_NullStore()));
+      final m = s.engine.state.validMoves().first;
+      s.engine.move(m.from, m.to);
+      final json = LevelRun.fromEngine(s.engine, LevelStatus.failed, failReason: BoardStatus.deadlock).toJson()
+        ..remove('sig');
+      final legacy = LevelRun.fromJson(json)!;
+      expect(legacy.levelSig, isNull);
+      expect(legacy.isValidFor(level1), isTrue);
+      final changed = Level(number: 1, par: 3, layout: [...level1.layout.reversed]);
+      expect(legacy.isValidFor(changed), isFalse);
+    });
+  });
+}
+
+class _NullStore implements ProgressStore {
+  @override
+  String? read(String key) => null;
+  @override
+  Future<bool> write(String key, String value) async => true;
+  @override
+  Future<void> remove(String key) async {}
 }

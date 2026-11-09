@@ -5,7 +5,8 @@ import 'package:ball_sort_party/game/engine/failure_monitor.dart';
 import 'package:ball_sort_party/game/flame/ball_sort_game.dart';
 import 'package:ball_sort_party/game/levels/level.dart';
 import 'package:ball_sort_party/game/levels/level_data.dart';
-import 'package:ball_sort_party/game/session/level_run.dart';
+import 'package:ball_sort_party/game/engine/game_state.dart';
+import 'package:ball_sort_party/game/session/level_session.dart';
 import 'package:ball_sort_party/screens/game/game_screen.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
@@ -214,29 +215,39 @@ void main() {
   });
 
   testWidgets('FAILED survives an app restart and is shown again', (tester) async {
-    final h = await _open(tester, level: kLevels.first);
-    // Play into a saved attempt on the real level 1, mark it FAILED as the
-    // failure check would, then simulate closing and reopening the app.
-    final engine = h.game.engine;
-    final m = engine.state.validMoves().first;
-    await h.tapBottle(m.from);
-    await h.tapBottle(m.to);
-    await h.settle();
-    final run = h.progress.runFor(1)!;
-    h.progress.saveRun(1, LevelRun(
-      status: LevelStatus.failed,
-      failReason: BoardStatus.deadlock,
-      layout: run.layout,
-      history: run.history,
-      moveCount: run.moveCount,
-      extraBottlesAdded: run.extraBottlesAdded,
-    ));
+    // A real level and a real dead end reachable from its start.
+    final (level, path) = _reachableDeadlock();
+    SharedPreferences.setMockInitialValues({});
+    final p = await PlayerProgress.load();
+    final session = LevelSession(level, p);
+    for (final m in path) {
+      session.engine.move(m.from, m.to);
+    }
+    session.save();
+    session.fail(BoardStatus.deadlock);
+    final layout = session.engine.state.toLayout();
+
     final reloaded = await PlayerProgress.load(); // app closed and reopened
-    await tester.pumpWidget(const SizedBox());
-    final h2 = await _open(tester, level: kLevels.first, progress: reloaded);
+    final h = await _open(tester, level: level, progress: reloaded);
     expect(find.text('HAMLE KALMADI!'), findsOneWidget);
-    expect(h2.game.engine.state.toLayout(), run.layout);
+    expect(h.game.engine.state.toLayout(), layout);
+    expect(reloaded.isLevelFailed(level.number), isTrue);
     expect(reloaded.lives, PlayerProgress.maxLives);
+  });
+
+  testWidgets('a FAILED flag on a playable board (crash after paid rescue) self-heals', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final p = await PlayerProgress.load();
+    final level = kLevels.first;
+    final session = LevelSession(level, p);
+    final m = session.engine.state.validMoves().first;
+    session.engine.move(m.from, m.to);
+    session.save();
+    session.fail(BoardStatus.deadlock); // stale flag: board is still solvable
+    final h = await _open(tester, level: level, progress: await PlayerProgress.load());
+    expect(find.text('HAMLE KALMADI!'), findsNothing);
+    expect(h.progress.isLevelFailed(level.number), isFalse);
+    expect(h.progress.lives, PlayerProgress.maxLives);
   });
 
   testWidgets('winning a level → COMPLETED (rewarded once, attempt cleared)', (tester) async {
@@ -256,4 +267,24 @@ void main() {
     expect(h.progress.isLevelFailed(1), isFalse);
     await tester.pump(const Duration(seconds: 4));
   });
+}
+
+/// BFS over real levels for a dead end (no valid move) reachable from start.
+(Level, List<Move>) _reachableDeadlock() {
+  for (final level in kLevels) {
+    final start = level.createState();
+    final seen = <String>{start.canonicalKey};
+    final queue = <(GameState, List<Move>)>[(start, const [])];
+    for (var i = 0; i < queue.length && i < 20000; i++) {
+      final (state, path) = queue[i];
+      for (final m in state.validMoves()) {
+        final next = state.apply(m);
+        if (!seen.add(next.canonicalKey)) continue;
+        final p = [...path, m];
+        if (!next.isSolved && !next.hasValidMoves) return (level, p);
+        queue.add((next, p));
+      }
+    }
+  }
+  throw StateError('no reachable deadlock');
 }

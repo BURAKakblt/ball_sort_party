@@ -95,6 +95,16 @@ class AudioService with WidgetsBindingObserver {
     BallType.volleyball: 'audio/sfx/land_volleyball.wav',
   };
 
+  /// Single-impact landings used with "reduce motion": the ball doesn't
+  /// rebound visually, so the sound has no rebound taps either.
+  static const landSingleAssets = {
+    BallType.basketball: 'audio/sfx/land_basketball_single.wav',
+    BallType.football: 'audio/sfx/land_football_single.wav',
+    BallType.baseball: 'audio/sfx/land_baseball_single.wav',
+    BallType.tennis: 'audio/sfx/land_tennis_single.wav',
+    BallType.volleyball: 'audio/sfx/land_volleyball_single.wav',
+  };
+
   /// Minimum gap between two plays of the same effect.
   static const minGap = Duration(milliseconds: 70);
 
@@ -139,7 +149,7 @@ class AudioService with WidgetsBindingObserver {
     _initialized = true;
     // Each step is guarded separately: one failure must not silence the rest.
     await _guard(_backend.init);
-    for (final asset in [...sfxAssets.values, ...landAssets.values]) {
+    for (final asset in [...sfxAssets.values, ...landAssets.values, ...landSingleAssets.values]) {
       if (!await _guardResult(() => _backend.preloadSfx(asset))) _missing.add(asset);
     }
     if (_missing.isNotEmpty) debugPrint('AudioService: missing sounds $_missing');
@@ -156,8 +166,11 @@ class AudioService with WidgetsBindingObserver {
 
   void play(Sfx sfx) => _playAsset(sfxAssets[sfx]!);
 
-  /// Landing sound for the given ball type.
-  void playLand(BallType type) => _playAsset(landAssets[type]!);
+  /// Landing sound for [type], matching the current animation style.
+  void playLand(BallType type) {
+    final reduced = _progress?.reduceMotion ?? false;
+    _playAsset((reduced ? landSingleAssets : landAssets)[type]!);
+  }
 
   void _playAsset(String asset) {
     if (!_initialized || !_sfxEnabled || !_foreground || _missing.contains(asset)) return;

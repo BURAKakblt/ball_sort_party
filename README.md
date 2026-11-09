@@ -32,6 +32,8 @@ lib/
   screens/         Ana menü, oyun, seviyeler, mağaza, koleksiyon, ayarlar, can bitti
 tool/level_tool.dart   Seviye üretici + BFS ile optimum hamle (par) hesaplayıcı
 tool/gen_audio.dart    Tüm müzik ve efektleri sıfırdan sentezler (assets/audio/CREDITS.md)
+tool/level_metrics.dart  Seviye zorluk raporu (par, durum sayısı, çıkmaz %, sıradan oyuncu başarı %)
+tool/level_search.dart   Zorluk hedefine uyan dizilim arar
 ```
 
 ## Oyun kuralları (özet)
@@ -43,6 +45,19 @@ tool/gen_audio.dart    Tüm müzik ve efektleri sıfırdan sentezler (assets/aud
   menüye dönüş ücretsizdir. Can: en fazla 5, 20 dakikada 1 yenilenir.
 - Ekstra şişe bölüm başına 1 kez (güçlendirici, 200 altınla kurtarma veya reklam ödülü — hangisi önce).
 - Sürpriz hediye: 48 saatte bir 1 kutu; olasılıklar ekranda (ⓘ) gösterilir.
+
+## Kayıt
+
+Tüm ilerleme tek bir JSON belgesi olarak tek anahtarda (`player_progress`, şema 2) tutulur;
+her yazma belgeyi bütün olarak değiştirir. Çok adımlı işlemler (ör. altınla kurtarma:
+altın + şişe + tahta) `PlayerProgress.transaction` ile tek yazmada kaydedilir; satın almalar
+istek kimliğiyle idempotenttir. Eski `player_progress_v1` kaydı otomatik taşınır ve yedek olarak korunur.
+
+## Müzik döngüsü (iOS)
+
+audioplayers iOS'ta döngüyü "bitti → başa sar → çal" ile yaptığı için döngü noktasında boşluk oluşur.
+iOS'ta müzik `ios/Runner/AppDelegate.swift` içindeki küçük `GaplessMusicPlugin` (AVAudioPlayer,
+`numberOfLoops = -1`) ile çalınır; başarısız olursa audioplayers'a düşer. Android: MediaPlayer yerel döngü.
 
 ## Güvenlik notu
 

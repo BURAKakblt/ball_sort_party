@@ -18,6 +18,7 @@ third-party recordings were used.
 | sfx/land_baseball.wav | Baseball landing: hard, short wooden tock |
 | sfx/land_tennis.wav | Tennis landing: bright quick "pock" with 3 small rebounds |
 | sfx/land_volleyball.wav | Volleyball landing: soft, muffled thud |
+| sfx/land_*_single.wav | Single-impact landing per ball (used with "reduce motion") |
 | sfx/select.wav | Ball picked up |
 | sfx/invalid.wav | Invalid move (quiet, gentle) |
 | sfx/button.wav | Button tap |

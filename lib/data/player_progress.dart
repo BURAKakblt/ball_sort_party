@@ -8,6 +8,20 @@ import '../game/levels/level_data.dart';
 import '../game/session/level_run.dart';
 import 'economy_config.dart';
 import 'gift_config.dart';
+import 'progress_store.dart';
+
+/// Outcome of [PlayerProgress.purchase].
+enum PurchaseResult {
+  success,
+
+  /// This request id was already completed; nothing was charged again.
+  alreadyProcessed,
+  insufficientCoins,
+
+  /// The item could not be applied (e.g. extra bottle already used);
+  /// nothing was charged.
+  notApplicable,
+}
 
 /// Player economy, progress and settings, persisted locally (offline-first).
 ///
@@ -18,7 +32,10 @@ import 'gift_config.dart';
 /// speed up life regeneration / gift timers, and clearing app data resets
 /// progress. A server-side economy is required to prevent that.
 class PlayerProgress extends ChangeNotifier {
-  PlayerProgress(this._prefs, {DateTime Function()? clock})
+  PlayerProgress(SharedPreferences prefs, {DateTime Function()? clock})
+    : this.withStore(SharedPreferencesStore(prefs), clock: clock);
+
+  PlayerProgress.withStore(this._store, {DateTime Function()? clock})
     : _now = clock ?? DateTime.now {
     _load();
   }
@@ -33,7 +50,18 @@ class PlayerProgress extends ChangeNotifier {
   static const startingCoins = EconomyConfig.startingCoins;
   static const streakDays = 7;
 
-  final SharedPreferences _prefs;
+  final ProgressStore _store;
+
+  /// Ids of completed purchase requests (idempotency), newest last.
+  late List<String> _processed;
+  static const _processedLimit = 200;
+
+  int _txDepth = 0;
+  bool _txDirty = false;
+
+  /// True when the last write failed; the next save retries the full state.
+  bool _unsaved = false;
+  bool get hasUnsavedChanges => _unsaved;
   final DateTime Function() _now;
 
   late int _coins;
@@ -99,14 +127,14 @@ class PlayerProgress extends ChangeNotifier {
     // Missing timer, or clock moved backwards past one full period.
     if (next == null || next - now > lifeRegen.inMilliseconds) {
       _nextLifeAtMs = now + lifeRegen.inMilliseconds;
-      _save();
+      _persist();
       return;
     }
     if (now < next) return;
     final gained = 1 + (now - next) ~/ lifeRegen.inMilliseconds;
     _lives = min(maxLives, _lives + gained);
     _nextLifeAtMs = _lives >= maxLives ? null : next + gained * lifeRegen.inMilliseconds;
-    _save();
+    _persist();
   }
 
   /// Call periodically (e.g. every second) so listeners see regenerated lives.
@@ -156,17 +184,55 @@ class PlayerProgress extends ChangeNotifier {
 
   // ---------------------------------------------------------------- coins & items
 
-  /// Atomic purchase: succeeds only if the player can afford [cost] AND
-  /// [apply] succeeds. Coins are deducted and the result saved together, so
-  /// the player never pays without receiving the item (and vice versa).
-  bool spend(int cost, bool Function() apply) {
-    _regenerate();
-    if (cost < 0 || _coins < cost) return false;
-    if (!apply()) return false;
-    _coins -= cost;
-    _commit();
-    return true;
+  /// Runs [body] as one unit: every change made inside (coins, items, saved
+  /// board via [saveRun], …) is written in a SINGLE save at the end. If
+  /// [body] throws, the in-memory state is rolled back and nothing is saved.
+  T transaction<T>(T Function() body) {
+    final snapshot = _txDepth == 0 ? _toJson() : null;
+    _txDepth++;
+    try {
+      return body();
+    } catch (_) {
+      if (snapshot != null) {
+        _fromJson(snapshot);
+        _txDirty = false;
+      }
+      rethrow;
+    } finally {
+      _txDepth--;
+      if (_txDepth == 0 && _txDirty) {
+        _txDirty = false;
+        _save();
+        notifyListeners();
+      }
+    }
   }
+
+  /// Atomic, idempotent purchase. Coins are deducted only if the player can
+  /// afford [cost] AND [apply] succeeds; both changes are saved together.
+  /// A repeated [requestId] is never charged or applied twice.
+  PurchaseResult purchase(int cost, bool Function() apply, {String? requestId}) {
+    if (requestId != null && _processed.contains(requestId)) {
+      return PurchaseResult.alreadyProcessed;
+    }
+    _regenerate();
+    if (cost < 0 || _coins < cost) return PurchaseResult.insufficientCoins;
+    return transaction(() {
+      if (!apply()) return PurchaseResult.notApplicable;
+      _coins -= cost;
+      if (requestId != null) {
+        _processed.add(requestId);
+        if (_processed.length > _processedLimit) _processed.removeAt(0);
+      }
+      _commit();
+      return PurchaseResult.success;
+    });
+  }
+
+  /// [purchase] without a request id; true on success.
+  bool spend(int cost, bool Function() apply) => purchase(cost, apply) == PurchaseResult.success;
+
+  bool wasProcessed(String requestId) => _processed.contains(requestId);
 
   bool canAfford(int cost) => _coins >= cost;
 
@@ -361,25 +427,17 @@ class PlayerProgress extends ChangeNotifier {
   }
 
   Future<void> resetAll() async {
-    await _prefs.remove(_key);
+    await _store.remove(SaveSchema.key);
+    await _store.remove(SaveSchema.legacyKey);
     _load();
     notifyListeners();
   }
 
   // ---------------------------------------------------------------- persistence
 
-  static const _key = 'player_progress_v1';
+  void _load() => _fromJson(SaveSchema.load(_store) ?? {});
 
-  void _load() {
-    Map<String, dynamic> m = {};
-    final raw = _prefs.getString(_key);
-    if (raw != null) {
-      try {
-        m = jsonDecode(raw) as Map<String, dynamic>;
-      } on FormatException {
-        m = {};
-      }
-    }
+  void _fromJson(Map<String, dynamic> m) {
     int readInt(String k, int fallback) => max(0, (m[k] as num?)?.toInt() ?? fallback);
     double readVol(String k) => ((m[k] as num?)?.toDouble() ?? 0.8).clamp(0, 1).toDouble();
 
@@ -409,6 +467,9 @@ class PlayerProgress extends ChangeNotifier {
         _runs[level] = run;
       }
     }
+    _processed = [
+      for (final id in (m['processed'] as List? ?? const [])) '$id',
+    ];
     soundOn = m['sound'] as bool? ?? true;
     musicOn = m['music'] as bool? ?? true;
     sfxVolume = readVol('sfxVolume');
@@ -417,10 +478,37 @@ class PlayerProgress extends ChangeNotifier {
     reduceMotion = m['reduceMotion'] as bool? ?? false;
   }
 
+  /// Writes the whole save as one document (one key, one write).
   void _save() {
-    _prefs.setString(
-      _key,
-      jsonEncode({
+    final json = jsonEncode(_toJson());
+    _unsaved = true;
+    _store.write(SaveSchema.key, json).then(
+      (ok) {
+        // A newer write may have started meanwhile; only clear if this one won.
+        if (ok && _lastWritten == json) _unsaved = false;
+      },
+      onError: (Object _) {},
+    );
+    _lastWritten = json;
+  }
+
+  String? _lastWritten;
+
+  /// Retries persisting the current state (e.g. after a failed write).
+  Future<bool> flush() async {
+    final json = jsonEncode(_toJson());
+    _lastWritten = json;
+    try {
+      final ok = await _store.write(SaveSchema.key, json);
+      if (ok) _unsaved = false;
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Map<String, dynamic> _toJson() => {
+        'schema': SaveSchema.current,
         'coins': _coins,
         'lives': _lives,
         'nextLifeAt': _nextLifeAtMs,
@@ -440,11 +528,24 @@ class PlayerProgress extends ChangeNotifier {
         'musicVolume': musicVolume,
         'haptics': hapticsOn,
         'reduceMotion': reduceMotion,
-      }),
-    );
+        'processed': _processed,
+      };
+
+  /// Save without notifying (inside a transaction: deferred).
+  void _persist() {
+    if (_txDepth > 0) {
+      _txDirty = true;
+    } else {
+      _save();
+    }
   }
 
+  /// Save and notify listeners (inside a transaction: deferred to its end).
   void _commit() {
+    if (_txDepth > 0) {
+      _txDirty = true;
+      return;
+    }
     _save();
     notifyListeners();
   }

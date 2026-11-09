@@ -1,6 +1,7 @@
 import 'package:ball_sort_party/game/engine/ball_type.dart';
 import 'package:ball_sort_party/game/engine/game_state.dart';
 import 'package:ball_sort_party/game/engine/solver.dart';
+import 'package:ball_sort_party/game/levels/difficulty.dart';
 import 'package:ball_sort_party/game/levels/level_data.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -41,9 +42,37 @@ void main() {
     });
   }
 
-  test('difficulty never decreases', () {
-    for (var i = 1; i < kLevels.length; i++) {
-      expect(kLevels[i].par, greaterThanOrEqualTo(kLevels[i - 1].par));
+  test('level 1 is a short, forgiving tutorial', () {
+    final l1 = kLevels.first;
+    expect(l1.par, lessThanOrEqualTo(3));
+    expect(l1.ballTypes.length, 2);
+    expect(casualWins(l1.createState(), playouts: 500), 100);
+  });
+
+  test('difficulty rises gradually (casual-player win rate)', () {
+    final rates = [for (final l in kLevels) casualWins(l.createState(), playouts: 1000)];
+    for (var i = 1; i < rates.length; i++) {
+      // Never noticeably easier than the previous level…
+      expect(rates[i], lessThanOrEqualTo(rates[i - 1] + 3), reason: 'L${i + 1} $rates');
+      // …and no sudden wall.
+      expect(rates[i - 1] - rates[i], lessThan(30), reason: 'L${i + 1} $rates');
+    }
+    expect(rates.last, greaterThan(5), reason: 'last level stays beatable');
+  });
+
+  test('new ball types are introduced one at a time', () {
+    var known = <BallType>{};
+    for (final l in kLevels) {
+      final added = l.ballTypes.difference(known);
+      expect(added.length, lessThanOrEqualTo(l.number == 1 ? 2 : 1), reason: 'L${l.number}');
+      known = {...known, ...l.ballTypes};
+    }
+    expect(known, BallType.values.toSet());
+  });
+
+  test('par values are the true optimum', () {
+    for (final l in kLevels) {
+      expect(const Solver(maxStates: 3000000).minimumMoves(l.createState()), l.par, reason: 'L${l.number}');
     }
   });
 

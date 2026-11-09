@@ -32,6 +32,8 @@ class LevelSession {
       engine = run.toEngine(level);
       _status = run.status;
       _failReason = run.failReason;
+      // Saves from before failIds existed get a stable one derived from the board.
+      _failId = run.failId ?? (run.isFailed ? 'legacy-${run.moveCount}-${run.layout.join('.')}' : null);
     } else {
       engine = GameEngine(level.createState());
     }
@@ -43,7 +45,11 @@ class LevelSession {
 
   LevelStatus _status = LevelStatus.playing;
   BoardStatus? _failReason;
+  String? _failId;
   int _coinsAwarded = 0;
+
+  /// Idempotency key for paid rescues of the current failure.
+  String? get rescueRequestId => isFailed ? 'rescue:${level.number}:$_failId' : null;
 
   LevelStatus get status => _status;
   bool get isFailed => _status == LevelStatus.failed;
@@ -60,7 +66,10 @@ class LevelSession {
       progress.discardRun(level.number); // nothing worth resuming
       return;
     }
-    progress.saveRun(level.number, LevelRun.fromEngine(engine, _status, failReason: _failReason));
+    progress.saveRun(
+      level.number,
+      LevelRun.fromEngine(engine, _status, failReason: _failReason, failId: _failId),
+    );
   }
 
   /// PLAYING → FAILED (deadlock or proven unsolvable).
@@ -68,7 +77,29 @@ class LevelSession {
     if (_status != LevelStatus.playing) return;
     _status = LevelStatus.failed;
     _failReason = reason;
+    _failId = '${DateTime.now().microsecondsSinceEpoch}-${engine.moveCount}';
     save();
+  }
+
+  /// Paid rescue (e.g. 200 coins → extra bottle) applied atomically: the
+  /// coins, the changed board and FAILED → PLAYING are saved in ONE write,
+  /// and a repeated request for the same failure is never charged twice.
+  ///
+  /// [apply] changes the board and returns false if it can't (then nothing
+  /// is charged). Only call when the result is known to be playable, or
+  /// pass [recoverAfter] = false to keep FAILED until the board is analyzed.
+  PurchaseResult paidRescue(int cost, bool Function() apply, {bool recoverAfter = false}) {
+    final id = rescueRequestId;
+    if (id == null) return PurchaseResult.notApplicable;
+    return progress.transaction(() {
+      final result = progress.purchase(cost, () {
+        if (!apply()) return false;
+        save(); // board change, still FAILED, same write as the coins
+        return true;
+      }, requestId: id);
+      if (result == PurchaseResult.success && recoverAfter) recover();
+      return result;
+    });
   }
 
   /// FAILED → PLAYING after a successful rescue that changed the board.
@@ -76,6 +107,7 @@ class LevelSession {
     if (!isFailed) return;
     _status = LevelStatus.playing;
     _failReason = null;
+    _failId = null;
     progress.recoverLevel(level.number, LevelRun.fromEngine(engine, _status));
   }
 
@@ -95,6 +127,7 @@ class LevelSession {
     engine.reset();
     _status = LevelStatus.playing;
     _failReason = null;
+    _failId = null;
   }
 
   /// PLAYING → COMPLETED. Rewards are granted once per attempt.
@@ -103,6 +136,7 @@ class LevelSession {
     if (isCompleted) return _coinsAwarded;
     _status = LevelStatus.completed;
     _failReason = null;
+    _failId = null;
     _coinsAwarded = progress.completeLevel(level.number, stars);
     return _coinsAwarded;
   }

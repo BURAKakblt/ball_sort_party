@@ -36,7 +36,21 @@ void main() {
   }
   final music = _music();
   _writeWav('assets/audio/music/party_loop.wav', _finish(music, _musicRate, peakDb: -4, fade: false), _musicRate);
-  print('Generated ${sfx.length} effects + 1 music loop.');
+
+  // Single-impact variants for the "reduce motion" setting (no rebounds in
+  // the animation → no rebounds in the sound). Generated last so the noise
+  // sequence of the files above stays identical.
+  final single = <String, Float64List Function()>{
+    'land_basketball_single': () => _landBasketball(single: true),
+    'land_football_single': () => _landFootball(single: true),
+    'land_baseball_single': () => _landBaseball(single: true),
+    'land_tennis_single': () => _landTennis(single: true),
+    'land_volleyball_single': () => _landVolleyball(single: true),
+  };
+  for (final e in single.entries) {
+    _writeWav('assets/audio/sfx/${e.key}.wav', _finish(e.value(), _sfxRate), _sfxRate);
+  }
+  print('Generated ${sfx.length + single.length} effects + 1 music loop.');
 }
 
 // ------------------------------------------------------------------ helpers
@@ -202,9 +216,9 @@ void _writeWav(String path, Float64List data, int rate) {
 // ------------------------------------------------------------------ ball landings
 // Rebound timings roughly follow the animation profiles in ball_component.dart.
 
-Float64List _landBasketball() {
-  final b = _buf(0.55);
-  for (final (at, g) in [(0.0, 1.0), (0.24, 0.42), (0.38, 0.16)]) {
+Float64List _landBasketball({bool single = false}) {
+  final b = _buf(single ? 0.22 : 0.55);
+  for (final (at, g) in single ? [(0.0, 1.0)] : [(0.0, 1.0), (0.24, 0.42), (0.38, 0.16)]) {
     _impact(b, at, g, f0: 150, f1: 72, bodyDecay: 13, noiseGain: 0.45, noiseLp: 1400);
     // Rubbery shell ring.
     _osc(b, at, 0.2, (_) => 215, _decay(24, gain: g * 0.22));
@@ -212,35 +226,35 @@ Float64List _landBasketball() {
   return b;
 }
 
-Float64List _landFootball() {
-  final b = _buf(0.35);
-  for (final (at, g) in [(0.0, 1.0), (0.2, 0.3)]) {
+Float64List _landFootball({bool single = false}) {
+  final b = _buf(single ? 0.16 : 0.35);
+  for (final (at, g) in single ? [(0.0, 1.0)] : [(0.0, 1.0), (0.2, 0.3)]) {
     _impact(b, at, g, f0: 210, f1: 115, bodyDecay: 26, noiseGain: 0.5, noiseLp: 3200, noiseHp: 600, noiseDecay: 90);
   }
   return b;
 }
 
-Float64List _landBaseball() {
-  final b = _buf(0.18);
+Float64List _landBaseball({bool single = false}) {
+  final b = _buf(single ? 0.075 : 0.18);
   // Hard, short wooden "tock".
   _osc(b, 0, 0.12, (_) => 560, _decay(48, gain: 0.8));
   _osc(b, 0, 0.06, (_) => 1340, _decay(80, gain: 0.3));
   _noise(b, 0, 0.03, _decay(260, gain: 0.9), highpass: 2200);
-  _impact(b, 0.08, 0.18, f0: 600, f1: 520, bodyDecay: 60, noiseGain: 0.4, noiseHp: 2500);
+  if (!single) _impact(b, 0.08, 0.18, f0: 600, f1: 520, bodyDecay: 60, noiseGain: 0.4, noiseHp: 2500);
   return b;
 }
 
-Float64List _landTennis() {
-  final b = _buf(0.42);
-  for (final (at, g) in [(0.0, 1.0), (0.15, 0.45), (0.245, 0.2), (0.31, 0.08)]) {
+Float64List _landTennis({bool single = false}) {
+  final b = _buf(single ? 0.12 : 0.42);
+  for (final (at, g) in single ? [(0.0, 1.0)] : [(0.0, 1.0), (0.15, 0.45), (0.245, 0.2), (0.31, 0.08)]) {
     _impact(b, at, g, f0: 470, f1: 310, bodyDecay: 38, noiseGain: 0.55, noiseHp: 2800, noiseDecay: 200);
   }
   return b;
 }
 
-Float64List _landVolleyball() {
-  final b = _buf(0.45);
-  for (final (at, g) in [(0.0, 0.8), (0.22, 0.22)]) {
+Float64List _landVolleyball({bool single = false}) {
+  final b = _buf(single ? 0.2 : 0.45);
+  for (final (at, g) in single ? [(0.0, 0.8)] : [(0.0, 0.8), (0.22, 0.22)]) {
     _impact(b, at, g, f0: 160, f1: 98, bodyDecay: 12, noiseGain: 0.6, noiseLp: 900, noiseDecay: 28);
   }
   return b;
