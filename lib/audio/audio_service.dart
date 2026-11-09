@@ -28,6 +28,9 @@ abstract interface class AudioBackend {
   Future<bool> preloadSfx(String asset);
   Future<void> playSfx(String asset, double volume);
 
+  /// Stops every effect that is currently sounding.
+  Future<void> stopAllSfx();
+
   /// Starts looping [asset]. Returns false if it could not be played.
   Future<bool> startMusic(String asset, double volume);
   Future<void> setMusicVolume(double volume);
@@ -44,6 +47,8 @@ class NoopAudioBackend implements AudioBackend {
   Future<bool> preloadSfx(String asset) async => true;
   @override
   Future<void> playSfx(String asset, double volume) async {}
+  @override
+  Future<void> stopAllSfx() async {}
   @override
   Future<bool> startMusic(String asset, double volume) async => true;
   @override
@@ -93,6 +98,11 @@ class AudioService with WidgetsBindingObserver {
   /// Minimum gap between two plays of the same effect.
   static const minGap = Duration(milliseconds: 70);
 
+  /// At most [burstLimit] effects may start within [burstWindow]; extra
+  /// ones are dropped so rapid play never piles up sounds.
+  static const burstLimit = 5;
+  static const burstWindow = Duration(milliseconds: 250);
+
   /// Music volume multiplier per mood.
   static const moodVolume = {MusicMood.menu: 0.55, MusicMood.game: 0.3};
 
@@ -101,6 +111,9 @@ class AudioService with WidgetsBindingObserver {
   final DateTime Function() _now;
 
   final Map<String, DateTime> _lastPlayed = {};
+  final List<DateTime> _recent = [];
+  double? _appliedMusicVolume;
+  bool _sfxWasEnabled = false;
   final Set<String> _missing = {};
   _MusicState _music = _MusicState.stopped;
   MusicMood _mood = MusicMood.menu;
@@ -151,6 +164,9 @@ class AudioService with WidgetsBindingObserver {
     final now = _now();
     final last = _lastPlayed[asset];
     if (last != null && now.difference(last) < minGap) return;
+    _recent.removeWhere((t) => now.difference(t) >= burstWindow);
+    if (_recent.length >= burstLimit) return;
+    _recent.add(now);
     _lastPlayed[asset] = now;
     _guard(() => _backend.playSfx(asset, _progress!.sfxVolume));
   }
@@ -158,15 +174,28 @@ class AudioService with WidgetsBindingObserver {
   void setMood(MusicMood mood) {
     if (_mood == mood) return;
     _mood = mood;
-    if (_music == _MusicState.playing) _guard(() => _backend.setMusicVolume(_musicVolume));
+    if (_music == _MusicState.playing) _setMusicVolume();
+  }
+
+  /// Only talks to the platform when the volume actually changed.
+  Future<void> _setMusicVolume() async {
+    final v = _musicVolume;
+    if (v == _appliedMusicVolume) return;
+    _appliedMusicVolume = v;
+    await _guard(() => _backend.setMusicVolume(v));
   }
 
   Future<void> _applySettings() async {
     if (!_initialized) return;
+    // Muting effects (or leaving the app) silences sounds already playing.
+    final sfxOn = _sfxEnabled && _foreground;
+    if (_sfxWasEnabled && !sfxOn) await _guard(_backend.stopAllSfx);
+    _sfxWasEnabled = sfxOn;
     final shouldPlay = _musicEnabled && _foreground && !_musicMissing;
     switch ((_music, shouldPlay)) {
       case (_MusicState.stopped, true):
         _music = _MusicState.playing; // set first: never start twice
+        _appliedMusicVolume = _musicVolume;
         final ok = await _guardResult(() => _backend.startMusic(musicAsset, _musicVolume));
         if (!ok) {
           _musicMissing = true;
@@ -174,10 +203,10 @@ class AudioService with WidgetsBindingObserver {
         }
       case (_MusicState.paused, true):
         _music = _MusicState.playing;
-        await _guard(() => _backend.setMusicVolume(_musicVolume));
+        await _setMusicVolume();
         await _guard(_backend.resumeMusic);
       case (_MusicState.playing, true):
-        await _guard(() => _backend.setMusicVolume(_musicVolume));
+        await _setMusicVolume();
       case (_MusicState.playing, false):
         _music = _MusicState.paused;
         await _guard(_backend.pauseMusic);

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../game/levels/level_data.dart';
+import '../game/session/level_run.dart';
 import 'economy_config.dart';
 import 'gift_config.dart';
 
@@ -47,6 +48,7 @@ class PlayerProgress extends ChangeNotifier {
   late int _dailyStreak;
   int? _lastGiftAtMs;
   String? _lastGiftId;
+  late Map<int, LevelRun> _runs;
 
   // Settings.
   late bool soundOn;
@@ -213,7 +215,7 @@ class PlayerProgress extends ChangeNotifier {
   // ---------------------------------------------------------------- levels
 
   /// Records a win. Coins are paid only on the first clear of a level.
-  /// Returns the coins awarded.
+  /// Clears any saved / FAILED attempt for it. Returns the coins awarded.
   int completeLevel(int level, int stars) {
     final best = _stars[level] ?? 0;
     final firstClear = best == 0;
@@ -221,8 +223,57 @@ class PlayerProgress extends ChangeNotifier {
     if (level >= _unlockedLevel) _unlockedLevel = level + 1;
     final reward = firstClear ? EconomyConfig.levelReward(level, levelCount) : 0;
     _coins += reward;
+    _runs.remove(level);
     _commit();
     return reward;
+  }
+
+  // ---------------------------------------------------------------- attempts
+  // Unfinished attempts are saved per level, so failing level A and then
+  // playing level B never clears A's FAILED state.
+
+  LevelRun? runFor(int level) => _runs[level];
+
+  bool isLevelFailed(int level) => _runs[level]?.isFailed ?? false;
+
+  /// Saves an in-progress attempt. A FAILED attempt can't be overwritten by a
+  /// PLAYING one here (use [recoverLevel]). Returns false if rejected.
+  bool saveRun(int level, LevelRun run) {
+    if (isLevelFailed(level) && !run.isFailed) return false;
+    _runs[level] = run;
+    _commit();
+    return true;
+  }
+
+  /// FAILED → PLAYING after a successful rescue (undo / coins / ad).
+  bool recoverLevel(int level, LevelRun run) {
+    if (!isLevelFailed(level) || run.isFailed) return false;
+    _runs[level] = run;
+    _commit();
+    return true;
+  }
+
+  /// Manual restart during normal play: free. Not allowed while FAILED.
+  bool discardRun(int level) {
+    if (isLevelFailed(level)) return false;
+    if (_runs.remove(level) != null) _commit();
+    return true;
+  }
+
+  /// Restarting a FAILED level: costs exactly one life and clears the
+  /// attempt, in a single save. Returns false (and changes nothing) when the
+  /// level isn't failed or there is no life left.
+  bool payRetry(int level) {
+    if (!isLevelFailed(level)) return false;
+    _regenerate();
+    if (_lives <= 0) return false;
+    if (_lives == maxLives) {
+      _nextLifeAtMs = _now().add(lifeRegen).millisecondsSinceEpoch;
+    }
+    _lives--;
+    _runs.remove(level);
+    _commit();
+    return true;
   }
 
   // ---------------------------------------------------------------- daily reward
@@ -347,6 +398,17 @@ class PlayerProgress extends ChangeNotifier {
     _dailyStreak = readInt('dailyStreak', 0);
     _lastGiftAtMs = (m['giftAt'] as num?)?.toInt();
     _lastGiftId = m['giftId'] as String?;
+    _runs = {};
+    final runs = m['runs'];
+    if (runs is Map) {
+      for (final e in runs.entries) {
+        final level = int.tryParse('${e.key}');
+        final run = LevelRun.fromJson(e.value);
+        if (level == null || run == null || level < 1 || level > kLevels.length) continue;
+        if (!run.isValidFor(kLevels[level - 1])) continue;
+        _runs[level] = run;
+      }
+    }
     soundOn = m['sound'] as bool? ?? true;
     musicOn = m['music'] as bool? ?? true;
     sfxVolume = readVol('sfxVolume');
@@ -371,6 +433,7 @@ class PlayerProgress extends ChangeNotifier {
         'dailyStreak': _dailyStreak,
         'giftAt': _lastGiftAtMs,
         'giftId': _lastGiftId,
+        'runs': {for (final e in _runs.entries) '${e.key}': e.value.toJson()},
         'sound': soundOn,
         'music': musicOn,
         'sfxVolume': sfxVolume,

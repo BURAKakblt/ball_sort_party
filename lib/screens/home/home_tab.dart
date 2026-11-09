@@ -52,7 +52,9 @@ class HomeTab extends StatelessWidget {
                         ),
                         const SizedBox(height: 16),
                         _PulsingPlayButton(
-                          label: allDone ? 'TEKRAR OYNA' : 'OYNA',
+                          label: p.runFor(p.currentLevel) != null
+                              ? 'DEVAM ET'
+                              : (allDone ? 'TEKRAR OYNA' : 'OYNA'),
                           onPressed: () => startLevel(context, p.currentLevel),
                         ),
                         const SizedBox(height: 20),

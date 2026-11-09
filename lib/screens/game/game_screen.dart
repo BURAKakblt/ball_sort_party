@@ -17,6 +17,7 @@ import '../../game/engine/failure_monitor.dart';
 import '../../game/engine/game_engine.dart';
 import '../../game/flame/ball_sort_game.dart';
 import '../../game/levels/level.dart';
+import '../../game/session/level_session.dart';
 import '../../services/rewarded_ad_service.dart';
 import '../settings/settings_screen.dart';
 import 'level_complete_overlay.dart';
@@ -38,14 +39,18 @@ class GameScreen extends StatefulWidget {
 enum _Exit { resume, restart, settings, home }
 
 class _GameScreenState extends State<GameScreen> {
-  late final GameEngine _engine = GameEngine(widget.level.createState());
-  late final FailureMonitor _monitor = FailureMonitor(widget.analyzer ?? BoardAnalyzer());
+  late final LevelSession _session = LevelSession(widget.level, _progress);
+  late final BoardAnalyzer _analyzer = widget.analyzer ?? BoardAnalyzer();
+  late final FailureMonitor _monitor = FailureMonitor(_analyzer);
   late final BallSortGame _game = BallSortGame(
     engine: _engine,
     hapticsEnabled: () => _progress.hapticsOn,
     reduceMotion: () => _progress.reduceMotion,
     listener: BoardListener(
-      onChanged: () => setState(() {}),
+      onChanged: () {
+        _session.save(); // resume later, and keep FAILED boards
+        setState(() {});
+      },
       onInvalid: _onInvalid,
       onSelected: () => _audio.play(Sfx.select),
       onBallLanded: _audio.playLand,
@@ -60,16 +65,28 @@ class _GameScreenState extends State<GameScreen> {
 
   bool _won = false;
   bool _retrying = false;
+  bool _rescueBusy = false;
   BoardStatus? _rescue;
+
+  /// Bumped whenever the rescue screen (re)opens so it starts fresh.
+  int _rescueEpoch = 0;
   int _invalidCount = 0;
   ({int stars, int coins, int moves})? _result;
 
   PlayerProgress get _progress => AppScope.read(context);
+  GameEngine get _engine => _session.engine;
 
   @override
   void initState() {
     super.initState();
     _audio = AppScope.audioOf(context)..setMood(MusicMood.game);
+    if (_session.isFailed) {
+      // Leaving / closing the app never clears FAILED: show the rescue again.
+      _rescue = _session.failReason ?? BoardStatus.deadlock;
+    } else if (_session.hasProgress) {
+      // The player may have left before the last failure check finished.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkFailure());
+    }
   }
 
   @override
@@ -92,7 +109,7 @@ class _GameScreenState extends State<GameScreen> {
 
   void _onSolved() {
     final stars = widget.level.starsFor(_engine.moveCount);
-    final coins = _progress.completeLevel(widget.level.number, stars);
+    final coins = _session.complete(stars); // PLAYING → COMPLETED, once
     _audio.play(Sfx.win);
     if (coins > 0) Future.delayed(const Duration(milliseconds: 900), () => _audio.play(Sfx.coin));
     setState(() {
@@ -104,14 +121,39 @@ class _GameScreenState extends State<GameScreen> {
 
   /// Runs after a move fully settled (win already excluded).
   Future<void> _checkFailure() async {
+    if (_session.isFailed || _session.isCompleted) return;
     final status = await _monitor.check(_engine.state, _engine.moveCount);
-    if (!mounted || status == null || _won || _engine.isSolved) return;
+    if (!mounted || status == null || _won || _engine.isSolved || _session.isFailed) return;
+    _session.fail(status); // PLAYING → FAILED (persisted)
     _audio.play(Sfx.lose);
-    setState(() => _rescue = status);
+    setState(() {
+      _rescue = status;
+      _rescueEpoch++;
+    });
   }
 
   void _closeRescue() {
     _monitor.invalidate();
+    setState(() => _rescue = null);
+  }
+
+  /// After undo / coins / ad changed a FAILED board: recover only if the
+  /// board is playable again; otherwise stay FAILED and keep the rescue open.
+  Future<void> _afterRescueAction() async {
+    if (!_session.isFailed) return _closeRescue();
+    _monitor.invalidate();
+    final status = await _analyzer.evaluate(_engine.state);
+    if (!mounted) return;
+    if (status == BoardStatus.deadlock || status == BoardStatus.unsolvable) {
+      // Still FAILED (the changed board was already saved as FAILED).
+      showToast(context, 'Hâlâ çözüm yok — bir hamle daha geri alabilirsin');
+      setState(() {
+        _rescue = status;
+        _rescueEpoch++;
+      });
+      return;
+    }
+    _session.recover(); // FAILED → PLAYING
     setState(() => _rescue = null);
   }
 
@@ -161,7 +203,7 @@ class _GameScreenState extends State<GameScreen> {
     if (_progress.undos <= 0 || !_engine.canUndo) return;
     if (_game.undo()) {
       _progress.useUndo();
-      _closeRescue();
+      _afterRescueAction();
     }
   }
 
@@ -227,33 +269,34 @@ class _GameScreenState extends State<GameScreen> {
       price: EconomyConfig.rescueWithCoinsPrice,
     );
     if (!ok) return;
+    if (_rescueBusy) return;
+    _rescueBusy = true;
+    // Atomic: coins are deducted only if the bottle was actually added.
     if (_progress.spend(EconomyConfig.rescueWithCoinsPrice, _game.addExtraBottle)) {
       _audio.play(Sfx.purchase);
-      _closeRescue();
-      _checkFailure();
+      await _afterRescueAction();
     }
+    _rescueBusy = false;
   }
 
   Future<void> _adRescue() async {
     final ads = AppScope.adsOf(context);
     // Reward only on a confirmed completed ad.
     if (await ads.show(AdPlacement.rescue) != AdResult.completed || !mounted) return;
-    if (_game.addExtraBottle()) {
-      _closeRescue();
-      _checkFailure();
-    }
+    if (_game.addExtraBottle()) await _afterRescueAction();
   }
 
-  /// Retrying a failed level costs exactly one life.
+  /// Retrying a FAILED level costs exactly one life (spent once, atomically).
   void _retryAfterFailure() {
     if (_retrying) return;
     _retrying = true;
-    if (!_progress.loseLife()) {
+    final result = _session.restart();
+    if (result == RestartResult.noLives) {
       _retrying = false;
       _openOutOfLives();
       return;
     }
-    _restartBoard();
+    _rebuildBoard();
     _retrying = false;
   }
 
@@ -263,8 +306,20 @@ class _GameScreenState extends State<GameScreen> {
 
   // ------------------------------------------------------------------ flow
 
-  /// Manual restart is free (no life cost).
+  /// Manual restart: free while PLAYING. (While FAILED the board is covered
+  /// by the rescue screen; if reached anyway it is charged as a retry.)
   void _restartBoard() {
+    if (_session.isFailed) return _retryAfterFailure();
+    _session.restart();
+    _rebuildBoard();
+  }
+
+  void _replay() {
+    _session.replay();
+    _rebuildBoard();
+  }
+
+  void _rebuildBoard() {
     _monitor.reset();
     _game.restart();
     setState(() {
@@ -367,7 +422,7 @@ class _GameScreenState extends State<GameScreen> {
             if (rescue != null && !_won)
               Positioned.fill(
                 child: RescueOverlay(
-                  key: ValueKey(_engine.moveCount),
+                  key: ValueKey(_rescueEpoch),
                   status: rescue,
                   canUndo: _engine.canUndo && p.undos > 0,
                   canAddBottle: _engine.canAddBottle,
@@ -389,7 +444,7 @@ class _GameScreenState extends State<GameScreen> {
                   coins: _result!.coins,
                   moves: _result!.moves,
                   reduceMotion: p.reduceMotion,
-                  onReplay: _restartBoard,
+                  onReplay: _replay,
                 ),
               ),
           ],

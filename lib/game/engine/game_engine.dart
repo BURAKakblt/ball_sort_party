@@ -50,6 +50,23 @@ class GameEngine {
   }) : _state = initial,
        _initial = initial;
 
+  /// Resumes a saved game. [current] must come from the same level as
+  /// [initial]; [history] is used for undo.
+  factory GameEngine.restore(
+    GameState initial, {
+    required GameState current,
+    List<Move> history = const [],
+    int moveCount = 0,
+    int extraBottlesAdded = 0,
+    int maxExtraBottles = 1,
+  }) {
+    return GameEngine(initial, maxExtraBottles: maxExtraBottles)
+      .._state = current
+      .._history.addAll(history)
+      .._moveCount = moveCount
+      .._extraBottlesAdded = extraBottlesAdded;
+  }
+
   final GameState _initial;
   final Solver solver;
   final int maxExtraBottles;
@@ -67,6 +84,8 @@ class GameEngine {
   bool get canUndo => _history.isNotEmpty;
   bool get canAddBottle => _extraBottlesAdded < maxExtraBottles && !isSolved;
   int get extraBottlesAdded => _extraBottlesAdded;
+  List<Move> get history => List.unmodifiable(_history);
+  GameState get initialState => _initial;
 
   /// True when the player cannot make any move (and the puzzle isn't solved).
   bool get isStuck => !isSolved && !_state.hasValidMoves;

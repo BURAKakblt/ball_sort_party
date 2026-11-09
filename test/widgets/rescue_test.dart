@@ -5,21 +5,24 @@ import 'package:ball_sort_party/game/engine/failure_monitor.dart';
 import 'package:ball_sort_party/game/flame/ball_sort_game.dart';
 import 'package:ball_sort_party/game/levels/level.dart';
 import 'package:ball_sort_party/game/levels/level_data.dart';
+import 'package:ball_sort_party/game/session/level_run.dart';
 import 'package:ball_sort_party/screens/game/game_screen.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Capacity-2 board where moving F (bottle 0) into the empty bottle 2 leaves
-/// no valid move: ['B', 'S', 'F'].
-const _trapLevel = Level(number: 1, par: 2, capacity: 2, layout: ['BF', 'S', '']);
+/// Solvable capacity-2 board where moving F (bottle 0) into the empty bottle
+/// 3 leaves no valid move: ['B', 'BS', 'FS', 'F'].
+const _trapLevel = Level(number: 1, par: 4, capacity: 2, layout: ['BF', 'BS', 'FS', '']);
+const _start = ['BF', 'BS', 'FS', ''];
 
 class _Harness {
-  _Harness(this.tester, this.progress);
+  _Harness(this.tester, this.progress, this.nav);
 
   final WidgetTester tester;
   final PlayerProgress progress;
+  final GlobalKey<NavigatorState> nav;
 
   BallSortGame get game =>
       tester.widget<GameWidget<BallSortGame>>(find.byType(GameWidget<BallSortGame>)).game!;
@@ -38,21 +41,42 @@ class _Harness {
   }
 
   Future<void> tapText(String text) async {
-    await tester.ensureVisible(find.text(text));
-    await tester.tap(find.text(text));
+    // Exact label first; labels with a counter (e.g. "GERİ AL  (5)") fall back
+    // to a prefix match.
+    final exact = find.text(text);
+    final finder = exact.evaluate().isNotEmpty
+        ? exact.last
+        : find.byWidgetPredicate((w) => w is Text && (w.data ?? '').startsWith(text)).first;
+    await tester.ensureVisible(finder);
+    await tester.tap(finder);
     await settle();
   }
 
   Future<void> fallIntoTrap() async {
     await tapBottle(0);
-    await tapBottle(2);
+    await tapBottle(3);
+    await settle();
+  }
+
+  /// Leaves the level (to the menu) and opens it again.
+  Future<void> reopenLevel(GlobalKey<NavigatorState> nav, {Level level = _trapLevel}) async {
+    nav.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => GameScreen(level: level, analyzer: BoardAnalyzer(check: BoardAnalyzer.syncCheck)),
+      ),
+    );
     await settle();
   }
 }
 
-Future<_Harness> _open(WidgetTester tester, {int? coins, Level level = _trapLevel}) async {
-  SharedPreferences.setMockInitialValues({});
-  final p = await PlayerProgress.load();
+Future<_Harness> _open(
+  WidgetTester tester, {
+  int? coins,
+  Level level = _trapLevel,
+  PlayerProgress? progress,
+}) async {
+  if (progress == null) SharedPreferences.setMockInitialValues({});
+  final p = progress ?? await PlayerProgress.load();
   if (coins != null) p.spend(p.coins - coins, () => true);
   tester.view.physicalSize = const Size(390, 844) * 3;
   tester.view.devicePixelRatio = 3;
@@ -75,7 +99,7 @@ Future<_Harness> _open(WidgetTester tester, {int? coins, Level level = _trapLeve
   for (var i = 0; i < 6; i++) {
     await tester.pump(const Duration(milliseconds: 100));
   }
-  return _Harness(tester, p);
+  return _Harness(tester, p, nav);
 }
 
 void main() {
@@ -84,7 +108,7 @@ void main() {
     await h.tapBottle(1); // pick S
     await h.tapBottle(0); // full bottle -> invalid
     await h.settle();
-    expect(h.game.engine.state.toLayout(), ['BF', 'S', '']);
+    expect(h.game.engine.state.toLayout(), _start);
     expect(h.game.engine.moveCount, 0);
     expect(h.progress.lives, PlayerProgress.maxLives);
     expect(h.progress.coins, EconomyConfig.startingCoins);
@@ -100,12 +124,15 @@ void main() {
     expect(find.text('HAMLE KALMADI!'), findsOneWidget);
   });
 
-  testWidgets('undo from the rescue restores the board', (tester) async {
+  testWidgets('undo from the rescue restores the board: FAILED → PLAYING', (tester) async {
     final h = await _open(tester);
     await h.fallIntoTrap();
+    expect(h.progress.isLevelFailed(1), isTrue);
     await h.tapText('GERİ AL');
     expect(find.text('HAMLE KALMADI!'), findsNothing);
-    expect(h.game.engine.state.toLayout(), ['BF', 'S', '']);
+    expect(find.text('ÇÖZÜM KALMADI!'), findsNothing);
+    expect(h.progress.isLevelFailed(1), isFalse);
+    expect(h.game.engine.state.toLayout(), _start);
     expect(h.progress.undos, EconomyConfig.startingUndos - 1);
     expect(h.progress.lives, PlayerProgress.maxLives);
   });
@@ -116,8 +143,9 @@ void main() {
     await h.tapText('200 ALTINLA KURTAR');
     await h.tapText('200 ALTINA AL'); // confirmation
     expect(h.progress.coins, EconomyConfig.startingCoins - 200);
-    expect(h.game.engine.state.bottleCount, 4);
+    expect(h.game.engine.state.bottleCount, 5);
     expect(find.text('HAMLE KALMADI!'), findsNothing);
+    expect(h.progress.isLevelFailed(1), isFalse);
     expect(h.progress.lives, PlayerProgress.maxLives);
   });
 
@@ -128,7 +156,7 @@ void main() {
     await h.tapText('200 ALTINLA KURTAR');
     expect(find.text('200 ALTINA AL'), findsNothing);
     expect(h.progress.coins, 199);
-    expect(h.game.engine.state.bottleCount, 3);
+    expect(h.game.engine.state.bottleCount, 4);
   });
 
   testWidgets('retry after failure costs exactly one life', (tester) async {
@@ -136,7 +164,7 @@ void main() {
     await h.fallIntoTrap();
     await h.tapText('TEKRAR DENE');
     expect(h.progress.lives, PlayerProgress.maxLives - 1);
-    expect(h.game.engine.state.toLayout(), ['BF', 'S', '']);
+    expect(h.game.engine.state.toLayout(), _start);
     expect(h.game.engine.moveCount, 0);
     expect(find.text('HAMLE KALMADI!'), findsNothing);
   });
@@ -170,5 +198,62 @@ void main() {
     await h.tapText('ANA MENÜ');
     expect(find.text('MENU'), findsOneWidget);
     expect(h.progress.lives, PlayerProgress.maxLives);
+    expect(h.progress.isLevelFailed(1), isTrue);
+  });
+
+  testWidgets('FAILED → menu → same level → still FAILED; retry costs 1 life', (tester) async {
+    final h = await _open(tester);
+    await h.fallIntoTrap();
+    await h.tapText('ANA MENÜ');
+    await h.reopenLevel(h.nav);
+    expect(find.text('HAMLE KALMADI!'), findsOneWidget, reason: 'no free restart via the menu');
+    expect(h.game.engine.moveCount, 1);
+    await h.tapText('TEKRAR DENE');
+    expect(h.progress.lives, PlayerProgress.maxLives - 1);
+    expect(h.game.engine.state.toLayout(), _start);
+  });
+
+  testWidgets('FAILED survives an app restart and is shown again', (tester) async {
+    final h = await _open(tester, level: kLevels.first);
+    // Play into a saved attempt on the real level 1, mark it FAILED as the
+    // failure check would, then simulate closing and reopening the app.
+    final engine = h.game.engine;
+    final m = engine.state.validMoves().first;
+    await h.tapBottle(m.from);
+    await h.tapBottle(m.to);
+    await h.settle();
+    final run = h.progress.runFor(1)!;
+    h.progress.saveRun(1, LevelRun(
+      status: LevelStatus.failed,
+      failReason: BoardStatus.deadlock,
+      layout: run.layout,
+      history: run.history,
+      moveCount: run.moveCount,
+      extraBottlesAdded: run.extraBottlesAdded,
+    ));
+    final reloaded = await PlayerProgress.load(); // app closed and reopened
+    await tester.pumpWidget(const SizedBox());
+    final h2 = await _open(tester, level: kLevels.first, progress: reloaded);
+    expect(find.text('HAMLE KALMADI!'), findsOneWidget);
+    expect(h2.game.engine.state.toLayout(), run.layout);
+    expect(reloaded.lives, PlayerProgress.maxLives);
+  });
+
+  testWidgets('winning a level → COMPLETED (rewarded once, attempt cleared)', (tester) async {
+    final h = await _open(tester);
+    // Optimal solution: S→empty, S→S, F→F, B→B.
+    for (final (from, to) in [(1, 3), (2, 3), (0, 2), (0, 1)]) {
+      await h.tapBottle(from);
+      await h.tapBottle(to);
+      await h.settle();
+    }
+    expect(h.game.engine.isSolved, isTrue);
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('TEBRİKLER!'), findsOneWidget);
+    expect(h.progress.runFor(1), isNull);
+    expect(h.progress.isLevelFailed(1), isFalse);
+    await tester.pump(const Duration(seconds: 4));
   });
 }
