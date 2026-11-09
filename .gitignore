@@ -46,3 +46,12 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Secrets: never commit keys, credentials or local environment files
+.env
+.env.*
+*.pem
+*.p8
+*.p12
+*.mobileprovision
+secrets/
