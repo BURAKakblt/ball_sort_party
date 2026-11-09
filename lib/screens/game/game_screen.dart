@@ -4,24 +4,32 @@ import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../../audio/audio_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/backgrounds.dart';
 import '../../core/widgets/game_button.dart';
 import '../../core/widgets/game_dialog.dart';
 import '../../core/widgets/resource_chips.dart';
+import '../../data/economy_config.dart';
 import '../../data/player_progress.dart';
+import '../../game/engine/failure_monitor.dart';
 import '../../game/engine/game_engine.dart';
 import '../../game/flame/ball_sort_game.dart';
 import '../../game/levels/level.dart';
+import '../../services/rewarded_ad_service.dart';
 import '../settings/settings_screen.dart';
 import 'level_complete_overlay.dart';
 import 'out_of_lives_screen.dart';
+import 'rescue_overlay.dart';
 
 class GameScreen extends StatefulWidget {
-  const GameScreen({super.key, required this.level});
+  const GameScreen({super.key, required this.level, this.analyzer});
 
   final Level level;
+
+  /// Failure detection; defaults to a background-isolate solver.
+  final BoardAnalyzer? analyzer;
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -31,31 +39,50 @@ enum _Exit { resume, restart, settings, home }
 
 class _GameScreenState extends State<GameScreen> {
   late final GameEngine _engine = GameEngine(widget.level.createState());
+  late final FailureMonitor _monitor = FailureMonitor(widget.analyzer ?? BoardAnalyzer());
   late final BallSortGame _game = BallSortGame(
     engine: _engine,
-    hapticsEnabled: () => AppScope.read(context).hapticsOn,
+    hapticsEnabled: () => _progress.hapticsOn,
+    reduceMotion: () => _progress.reduceMotion,
     listener: BoardListener(
       onChanged: () => setState(() {}),
       onInvalid: _onInvalid,
+      onSelected: () => _audio.play(Sfx.select),
+      onBallLanded: _audio.playLand,
+      onBottleCompleted: () => _audio.play(Sfx.bottleComplete),
+      onWinStarted: _monitor.invalidate,
       onSolved: _onSolved,
-      onStuck: () => setState(() => _stuck = true),
+      onSettled: _checkFailure,
     ),
   );
-  final _random = Random();
+  final _random = Random.secure();
+  late final AudioService _audio;
 
-  bool _stuck = false;
   bool _won = false;
+  bool _retrying = false;
+  BoardStatus? _rescue;
   int _invalidCount = 0;
   ({int stars, int coins, int moves})? _result;
 
   PlayerProgress get _progress => AppScope.read(context);
 
-  /// An unfinished level with moves played costs a life when abandoned.
-  bool get _wouldCostLife => !_won && _engine.moveCount > 0;
+  @override
+  void initState() {
+    super.initState();
+    _audio = AppScope.audioOf(context)..setMood(MusicMood.game);
+  }
+
+  @override
+  void dispose() {
+    _monitor.invalidate();
+    _audio.setMood(MusicMood.menu);
+    super.dispose();
+  }
 
   void _onInvalid(InvalidReason reason) {
+    // Invalid input never costs lives or coins and never changes the board.
+    _audio.play(Sfx.invalid);
     _invalidCount++;
-    // Teach the rule a couple of times, then stay quiet.
     if (_invalidCount <= 2 && reason == InvalidReason.mismatch) {
       showToast(context, 'Top yalnızca boş şişeye veya aynı türün üstüne konabilir');
     } else if (_invalidCount <= 2 && reason == InvalidReason.targetFull) {
@@ -65,58 +92,101 @@ class _GameScreenState extends State<GameScreen> {
 
   void _onSolved() {
     final stars = widget.level.starsFor(_engine.moveCount);
-    final coins = _progress.completeLevel(widget.level.number, stars, widget.level.coinReward);
+    final coins = _progress.completeLevel(widget.level.number, stars);
+    _audio.play(Sfx.win);
+    if (coins > 0) Future.delayed(const Duration(milliseconds: 900), () => _audio.play(Sfx.coin));
     setState(() {
       _won = true;
-      _stuck = false;
+      _rescue = null;
       _result = (stars: stars, coins: coins, moves: _engine.moveCount);
     });
   }
 
-  // ------------------------------------------------------------------ power-ups
-
-  void _undo() {
-    if (_game.undo()) setState(() => _stuck = false);
+  /// Runs after a move fully settled (win already excluded).
+  Future<void> _checkFailure() async {
+    final status = await _monitor.check(_engine.state, _engine.moveCount);
+    if (!mounted || status == null || _won || _engine.isSolved) return;
+    _audio.play(Sfx.lose);
+    setState(() => _rescue = status);
   }
 
-  Future<bool> _offerPurchase({
-    required String title,
-    required String item,
-    required int price,
-    required bool Function() buy,
-  }) async {
-    final canAfford = _progress.coins >= price;
+  void _closeRescue() {
+    _monitor.invalidate();
+    setState(() => _rescue = null);
+  }
+
+  // ------------------------------------------------------------------ power-ups
+
+  Future<bool> _confirmPurchase({required String title, required String message, required int price}) async {
+    if (!_progress.canAfford(price)) {
+      _audio.play(Sfx.invalid);
+      await showGameDialog<void>(
+        context,
+        title: title,
+        header: const CoinIcon(size: 56),
+        message: 'Yeterli altının yok ($price altın gerekli).\n'
+            'Bölümleri tamamlayarak, günlük ödül ve sürpriz hediyelerle altın kazanabilirsin.',
+        actions: const [DialogAction('TAMAM', null, palette: ButtonPalette.navy)],
+      );
+      return false;
+    }
     final ok = await showGameDialog<bool>(
       context,
       title: title,
       header: const CoinIcon(size: 56),
-      message: canAfford
-          ? '3 adet $item satın al?\nFiyat: $price altın'
-          : 'Yeterli altının yok ($price altın gerekli).\nBölümleri tamamlayarak ve günlük ödülle altın kazanabilirsin.',
+      message: '$message\nFiyat: $price altın',
       actions: [
-        if (canAfford) DialogAction('$price ALTINA AL', true, palette: ButtonPalette.gold),
+        DialogAction('$price ALTINA AL', true, palette: ButtonPalette.gold),
         const DialogAction('VAZGEÇ', false, palette: ButtonPalette.navy),
       ],
     );
-    if (ok != true) return false;
-    return buy();
+    return ok == true && mounted;
+  }
+
+  Future<void> _undo() async {
+    if (!_engine.canUndo) return;
+    if (_progress.undos <= 0) {
+      final ok = await _confirmPurchase(
+        title: 'GERİ AL',
+        message: '${EconomyConfig.undoPackSize} geri alma hakkı satın al?',
+        price: EconomyConfig.undoPackPrice,
+      );
+      if (!ok || !_progress.buyUndoPack()) return;
+      _audio.play(Sfx.purchase);
+    }
+    _applyUndo();
+  }
+
+  void _applyUndo() {
+    if (_progress.undos <= 0 || !_engine.canUndo) return;
+    if (_game.undo()) {
+      _progress.useUndo();
+      _closeRescue();
+    }
   }
 
   Future<void> _shuffle() async {
-    if (_progress.shuffles <= 0) {
-      final bought = await _offerPurchase(
-        title: 'KARIŞTIR',
-        item: 'karıştırma',
-        price: Prices.shuffle3,
-        buy: _progress.buyShuffles,
-      );
-      if (!bought || !mounted) return;
+    if (_progress.shuffles > 0) {
+      if (_game.shuffle(_random)) {
+        _progress.useShuffle();
+        _closeRescue();
+      } else {
+        showToast(context, 'Şu an karıştırılabilecek bir dizilim bulunamadı');
+      }
+      return;
     }
-    if (_game.shuffle(_random)) {
-      _progress.useShuffle();
-      setState(() => _stuck = false);
-    } else {
-      showToast(context, 'Şu an karıştırılabilecek bir dizilim bulunamadı');
+    final ok = await _confirmPurchase(
+      title: 'KARIŞTIR',
+      message: '1 karıştırma satın alıp hemen kullan?',
+      price: EconomyConfig.shufflePrice,
+    );
+    if (!ok) return;
+    // Coins are only spent if the shuffle actually happens.
+    if (_progress.spend(EconomyConfig.shufflePrice, () => _game.shuffle(_random))) {
+      _audio.play(Sfx.purchase);
+      _closeRescue();
+    } else if (mounted) {
+      showToast(context, 'Karıştırılamadı, altın harcanmadı');
     }
   }
 
@@ -125,58 +195,100 @@ class _GameScreenState extends State<GameScreen> {
       showToast(context, 'Bu bölümde ekstra şişe zaten kullanıldı');
       return;
     }
-    if (_progress.extraBottles <= 0) {
-      final bought = await _offerPurchase(
-        title: 'EKSTRA ŞİŞE',
-        item: 'ekstra şişe',
-        price: Prices.extraBottle3,
-        buy: _progress.buyExtraBottles,
-      );
-      if (!bought || !mounted) return;
+    if (_progress.extraBottles > 0) {
+      if (_game.addExtraBottle()) {
+        _progress.useExtraBottle();
+        _closeRescue();
+        _checkFailure();
+      }
+      return;
     }
+    final ok = await _confirmPurchase(
+      title: 'EKSTRA ŞİŞE',
+      message: '1 ekstra şişe satın alıp hemen kullan?',
+      price: EconomyConfig.extraBottlePrice,
+    );
+    if (!ok) return;
+    if (_progress.spend(EconomyConfig.extraBottlePrice, _game.addExtraBottle)) {
+      _audio.play(Sfx.purchase);
+      _closeRescue();
+      _checkFailure();
+    }
+  }
+
+  // ------------------------------------------------------------------ rescue
+
+  /// 200 coins → one extra empty bottle (the level's single extra slot).
+  Future<void> _coinRescue() async {
+    if (!_engine.canAddBottle) return;
+    final ok = await _confirmPurchase(
+      title: 'KURTAR',
+      message: 'Bölüme 1 boş şişe eklenecek.',
+      price: EconomyConfig.rescueWithCoinsPrice,
+    );
+    if (!ok) return;
+    if (_progress.spend(EconomyConfig.rescueWithCoinsPrice, _game.addExtraBottle)) {
+      _audio.play(Sfx.purchase);
+      _closeRescue();
+      _checkFailure();
+    }
+  }
+
+  Future<void> _adRescue() async {
+    final ads = AppScope.adsOf(context);
+    // Reward only on a confirmed completed ad.
+    if (await ads.show(AdPlacement.rescue) != AdResult.completed || !mounted) return;
     if (_game.addExtraBottle()) {
-      _progress.useExtraBottle();
-      setState(() => _stuck = false);
+      _closeRescue();
+      _checkFailure();
     }
+  }
+
+  /// Retrying a failed level costs exactly one life.
+  void _retryAfterFailure() {
+    if (_retrying) return;
+    _retrying = true;
+    if (!_progress.loseLife()) {
+      _retrying = false;
+      _openOutOfLives();
+      return;
+    }
+    _restartBoard();
+    _retrying = false;
+  }
+
+  void _openOutOfLives() {
+    Navigator.of(context).push(GameRoute(const OutOfLivesScreen()));
   }
 
   // ------------------------------------------------------------------ flow
 
-  /// Asks for confirmation when leaving costs a life. Returns true to proceed.
-  Future<bool> _confirmLifeLoss(String action) async {
-    if (!_wouldCostLife) return true;
-    final ok = await showGameDialog<bool>(
-      context,
-      title: 'EMİN MİSİN?',
-      header: const HeartIcon(size: 56, broken: true),
-      message: '$action 1 can kaybedersin.',
-      actions: const [
-        DialogAction('EVET', true, palette: ButtonPalette.pink),
-        DialogAction('VAZGEÇ', false, palette: ButtonPalette.navy),
-      ],
-    );
-    if (ok == true) _progress.loseLife();
-    return ok == true;
-  }
-
-  Future<void> _restart() async {
-    if (!await _confirmLifeLoss('Yeniden başlarsan') || !mounted) return;
-    if (!_progress.hasLives) {
-      Navigator.of(context).pushReplacement(GameRoute(const OutOfLivesScreen()));
-      return;
-    }
+  /// Manual restart is free (no life cost).
+  void _restartBoard() {
+    _monitor.reset();
     _game.restart();
     setState(() {
-      _stuck = false;
+      _rescue = null;
       _won = false;
       _result = null;
     });
   }
 
-  Future<void> _leave() async {
-    if (!await _confirmLifeLoss('Bölümden çıkarsan') || !mounted) return;
-    Navigator.of(context).pop();
+  Future<void> _confirmRestart() async {
+    if (_engine.moveCount == 0) return _restartBoard();
+    final ok = await showGameDialog<bool>(
+      context,
+      title: 'BAŞTAN BAŞLA?',
+      message: 'Bölüm ilk haline dönecek. Can kaybetmezsin.',
+      actions: const [
+        DialogAction('BAŞTAN BAŞLA', true, palette: ButtonPalette.purple),
+        DialogAction('VAZGEÇ', false, palette: ButtonPalette.navy),
+      ],
+    );
+    if (ok == true && mounted) _restartBoard();
   }
+
+  void _leave() => Navigator.of(context).pop();
 
   Future<void> _openSettings() async {
     _game.pauseEngine();
@@ -190,7 +302,6 @@ class _GameScreenState extends State<GameScreen> {
       context,
       title: 'DURAKLATILDI',
       header: const Icon(Icons.pause_circle_filled_rounded, size: 64, color: AppColors.turquoise),
-      message: _wouldCostLife ? 'Yeniden başlamak veya çıkmak 1 cana mal olur.' : null,
       actions: const [
         DialogAction('DEVAM ET', _Exit.resume, icon: Icons.play_arrow_rounded),
         DialogAction('YENİDEN BAŞLAT', _Exit.restart, palette: ButtonPalette.purple, icon: Icons.refresh_rounded),
@@ -202,11 +313,11 @@ class _GameScreenState extends State<GameScreen> {
     if (!mounted) return;
     switch (choice) {
       case _Exit.restart:
-        await _restart();
+        _restartBoard();
       case _Exit.settings:
         await _openSettings();
       case _Exit.home:
-        await _leave();
+        _leave();
       case _Exit.resume || null:
         break;
     }
@@ -217,70 +328,71 @@ class _GameScreenState extends State<GameScreen> {
   @override
   Widget build(BuildContext context) {
     final p = AppScope.of(context);
-    return PopScope(
-      canPop: !_wouldCostLife,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _leave();
-      },
-      child: Scaffold(
-        body: GradientBackground(
-          child: Stack(
-            children: [
-              SafeArea(
-                child: Column(
-                  children: [
-                    _Hud(
-                      level: widget.level.number,
-                      moves: _engine.moveCount,
-                      par: widget.level.par,
-                      onPause: _pause,
-                      onSettings: _openSettings,
+    final rescue = _rescue;
+    return Scaffold(
+      body: GradientBackground(
+        child: Stack(
+          children: [
+            SafeArea(
+              child: Column(
+                children: [
+                  _Hud(
+                    level: widget.level.number,
+                    moves: _engine.moveCount,
+                    par: widget.level.par,
+                    onPause: _pause,
+                    onSettings: _openSettings,
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: GameWidget(game: _game),
                     ),
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: GameWidget(game: _game),
-                      ),
-                    ),
-                    _PowerUpBar(
-                      canUndo: _engine.canUndo && !_won,
-                      shuffles: p.shuffles,
-                      extraBottles: p.extraBottles,
-                      canAddBottle: _engine.canAddBottle,
-                      enabled: !_won,
-                      onUndo: _undo,
-                      onShuffle: _shuffle,
-                      onExtraBottle: _extraBottle,
-                      onRestart: _restart,
-                    ),
-                  ],
+                  ),
+                  _PowerUpBar(
+                    canUndo: _engine.canUndo && !_won,
+                    undos: p.undos,
+                    shuffles: p.shuffles,
+                    extraBottles: p.extraBottles,
+                    canAddBottle: _engine.canAddBottle,
+                    enabled: !_won,
+                    onUndo: _undo,
+                    onShuffle: _shuffle,
+                    onExtraBottle: _extraBottle,
+                    onRestart: _confirmRestart,
+                  ),
+                ],
+              ),
+            ),
+            if (rescue != null && !_won)
+              Positioned.fill(
+                child: RescueOverlay(
+                  key: ValueKey(_engine.moveCount),
+                  status: rescue,
+                  canUndo: _engine.canUndo && p.undos > 0,
+                  canAddBottle: _engine.canAddBottle,
+                  adReady: AppScope.adsOf(context).isReady(AdPlacement.rescue),
+                  reduceMotion: p.reduceMotion,
+                  onUndo: _applyUndo,
+                  onCoinRescue: _coinRescue,
+                  onAdRescue: _adRescue,
+                  onRetry: _retryAfterFailure,
+                  onOutOfLives: _openOutOfLives,
+                  onHome: _leave,
                 ),
               ),
-              if (_stuck && !_won)
-                Positioned(
-                  left: 16,
-                  right: 16,
-                  bottom: MediaQuery.paddingOf(context).bottom + 110,
-                  child: _StuckBanner(onClose: () => setState(() => _stuck = false)),
+            if (_result != null)
+              Positioned.fill(
+                child: LevelCompleteOverlay(
+                  level: widget.level,
+                  stars: _result!.stars,
+                  coins: _result!.coins,
+                  moves: _result!.moves,
+                  reduceMotion: p.reduceMotion,
+                  onReplay: _restartBoard,
                 ),
-              if (_result != null)
-                Positioned.fill(
-                  child: LevelCompleteOverlay(
-                    level: widget.level,
-                    stars: _result!.stars,
-                    coins: _result!.coins,
-                    moves: _result!.moves,
-                    onReplay: () {
-                      _game.restart();
-                      setState(() {
-                        _won = false;
-                        _result = null;
-                      });
-                    },
-                  ),
-                ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );
@@ -352,6 +464,7 @@ class _Hud extends StatelessWidget {
 class _PowerUpBar extends StatelessWidget {
   const _PowerUpBar({
     required this.canUndo,
+    required this.undos,
     required this.shuffles,
     required this.extraBottles,
     required this.canAddBottle,
@@ -363,6 +476,7 @@ class _PowerUpBar extends StatelessWidget {
   });
 
   final bool canUndo;
+  final int undos;
   final int shuffles;
   final int extraBottles;
   final bool canAddBottle;
@@ -389,6 +503,7 @@ class _PowerUpBar extends StatelessWidget {
             child: RoundIconButton(
               icon: Icons.undo_rounded,
               caption: 'Geri Al',
+              count: undos > 0 ? '$undos' : '+',
               palette: ButtonPalette.turquoise,
               onPressed: canUndo ? onUndo : null,
             ),
@@ -420,45 +535,6 @@ class _PowerUpBar extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _StuckBanner extends StatelessWidget {
-  const _StuckBanner({required this.onClose});
-
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 350),
-      curve: Curves.easeOutBack,
-      builder: (context, t, child) => Transform.translate(
-        offset: Offset(0, (1 - t) * 40),
-        child: Opacity(opacity: t.clamp(0, 1), child: child),
-      ),
-      child: GlassPanel(
-        highlight: AppColors.pink,
-        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-        child: Row(
-          children: [
-            const Icon(Icons.block_rounded, color: AppColors.pink, size: 30),
-            const SizedBox(width: 10),
-            const Expanded(
-              child: Text(
-                'Hamle kalmadı! Geri al, ekstra şişe ekle veya karıştır.',
-                style: AppText.label,
-              ),
-            ),
-            IconButton(
-              onPressed: onClose,
-              icon: const Icon(Icons.close_rounded, color: AppColors.textMuted),
-            ),
-          ],
-        ),
       ),
     );
   }

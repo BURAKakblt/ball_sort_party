@@ -5,15 +5,17 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../game/levels/level_data.dart';
+import 'economy_config.dart';
+import 'gift_config.dart';
 
-/// Prices (in coins) for items sold in the shop.
-abstract final class Prices {
-  static const shuffle3 = 150;
-  static const extraBottle3 = 200;
-  static const refillLives = 250;
-}
-
-/// Player economy and progress, persisted locally (offline-first).
+/// Player economy, progress and settings, persisted locally (offline-first).
+///
+/// Every mutating method validates first and then applies all of its changes
+/// in a single save, so a purchase or reward is never half-applied.
+///
+/// Note: local storage is not tamper-proof. Changing the device clock can
+/// speed up life regeneration / gift timers, and clearing app data resets
+/// progress. A server-side economy is required to prevent that.
 class PlayerProgress extends ChangeNotifier {
   PlayerProgress(this._prefs, {DateTime Function()? clock})
     : _now = clock ?? DateTime.now {
@@ -25,10 +27,10 @@ class PlayerProgress extends ChangeNotifier {
     return PlayerProgress(prefs, clock: clock);
   }
 
-  static const maxLives = 5;
-  static const lifeRegen = Duration(minutes: 20);
-  static const dailyRewards = [50, 75, 100, 150, 200, 250, 500];
-  static const startingCoins = 200;
+  static const maxLives = EconomyConfig.maxLives;
+  static const lifeRegen = EconomyConfig.lifeRegen;
+  static const startingCoins = EconomyConfig.startingCoins;
+  static const streakDays = 7;
 
   final SharedPreferences _prefs;
   final DateTime Function() _now;
@@ -40,16 +42,25 @@ class PlayerProgress extends ChangeNotifier {
   late Map<int, int> _stars;
   late int _shuffles;
   late int _extraBottles;
+  late int _undos;
   String? _lastDailyClaim;
   late int _dailyStreak;
+  int? _lastGiftAtMs;
+  String? _lastGiftId;
+
+  // Settings.
   late bool soundOn;
   late bool musicOn;
+  late double sfxVolume;
+  late double musicVolume;
   late bool hapticsOn;
+  late bool reduceMotion;
 
   int get coins => _coins;
   int get unlockedLevel => _unlockedLevel;
   int get shuffles => _shuffles;
   int get extraBottles => _extraBottles;
+  int get undos => _undos;
   int starsFor(int level) => _stars[level] ?? 0;
   int get totalStars => _stars.values.fold(0, (a, b) => a + b);
   int get levelCount => kLevels.length;
@@ -60,6 +71,7 @@ class PlayerProgress extends ChangeNotifier {
 
   // ---------------------------------------------------------------- lives
 
+  /// Current lives. Can exceed [maxLives] temporarily via gifts.
   int get lives {
     _regenerate();
     return _lives;
@@ -72,7 +84,7 @@ class PlayerProgress extends ChangeNotifier {
     _regenerate();
     if (_lives >= maxLives || _nextLifeAtMs == null) return null;
     final ms = _nextLifeAtMs! - _now().millisecondsSinceEpoch;
-    return Duration(milliseconds: max(0, ms));
+    return Duration(milliseconds: ms.clamp(0, lifeRegen.inMilliseconds));
   }
 
   void _regenerate() {
@@ -80,19 +92,18 @@ class PlayerProgress extends ChangeNotifier {
       _nextLifeAtMs = null;
       return;
     }
+    final now = _now().millisecondsSinceEpoch;
     final next = _nextLifeAtMs;
-    if (next == null) {
-      _nextLifeAtMs = _now().add(lifeRegen).millisecondsSinceEpoch;
+    // Missing timer, or clock moved backwards past one full period.
+    if (next == null || next - now > lifeRegen.inMilliseconds) {
+      _nextLifeAtMs = now + lifeRegen.inMilliseconds;
       _save();
       return;
     }
-    final now = _now().millisecondsSinceEpoch;
     if (now < next) return;
     final gained = 1 + (now - next) ~/ lifeRegen.inMilliseconds;
     _lives = min(maxLives, _lives + gained);
-    _nextLifeAtMs = _lives >= maxLives
-        ? null
-        : next + gained * lifeRegen.inMilliseconds;
+    _nextLifeAtMs = _lives >= maxLives ? null : next + gained * lifeRegen.inMilliseconds;
     _save();
   }
 
@@ -103,51 +114,80 @@ class PlayerProgress extends ChangeNotifier {
     if (_lives != before) notifyListeners();
   }
 
-  /// Uses a life (e.g. restarting or quitting an unfinished level).
-  void loseLife() {
+  /// Uses one life. Only called when retrying a failed level.
+  /// Returns false when there was no life to use.
+  bool loseLife() {
     _regenerate();
-    if (_lives <= 0) return;
+    if (_lives <= 0) return false;
     if (_lives == maxLives) {
       _nextLifeAtMs = _now().add(lifeRegen).millisecondsSinceEpoch;
     }
     _lives--;
     _commit();
+    return true;
   }
 
-  bool buyLifeRefill() {
-    if (_lives >= maxLives || !_spend(Prices.refillLives)) return false;
+  /// Grants lives (gifts, future rewarded ads). May exceed [maxLives].
+  void addLives(int amount) {
+    _regenerate();
+    _lives += amount;
+    if (_lives >= maxLives) _nextLifeAtMs = null;
+    _commit();
+  }
+
+  int get refillPrice => EconomyConfig.refillPrice(lives);
+  bool get canBuyLife => lives < maxLives;
+
+  bool buyOneLife() => spend(EconomyConfig.oneLifePrice, () {
+    if (_lives >= maxLives) return false;
+    _lives++;
+    if (_lives >= maxLives) _nextLifeAtMs = null;
+    return true;
+  });
+
+  bool buyLifeRefill() => spend(refillPrice, () {
+    if (_lives >= maxLives) return false;
     _lives = maxLives;
     _nextLifeAtMs = null;
+    return true;
+  });
+
+  // ---------------------------------------------------------------- coins & items
+
+  /// Atomic purchase: succeeds only if the player can afford [cost] AND
+  /// [apply] succeeds. Coins are deducted and the result saved together, so
+  /// the player never pays without receiving the item (and vice versa).
+  bool spend(int cost, bool Function() apply) {
+    _regenerate();
+    if (cost < 0 || _coins < cost) return false;
+    if (!apply()) return false;
+    _coins -= cost;
     _commit();
     return true;
   }
 
-  // ---------------------------------------------------------------- coins & items
-
-  bool _spend(int amount) {
-    if (_coins < amount) return false;
-    _coins -= amount;
-    return true;
-  }
+  bool canAfford(int cost) => _coins >= cost;
 
   void addCoins(int amount) {
+    if (amount <= 0) return;
     _coins += amount;
     _commit();
   }
 
-  bool buyShuffles() {
-    if (!_spend(Prices.shuffle3)) return false;
-    _shuffles += 3;
-    _commit();
+  bool buyShuffle() => spend(EconomyConfig.shufflePrice, () {
+    _shuffles++;
     return true;
-  }
+  });
 
-  bool buyExtraBottles() {
-    if (!_spend(Prices.extraBottle3)) return false;
-    _extraBottles += 3;
-    _commit();
+  bool buyExtraBottle() => spend(EconomyConfig.extraBottlePrice, () {
+    _extraBottles++;
     return true;
-  }
+  });
+
+  bool buyUndoPack() => spend(EconomyConfig.undoPackPrice, () {
+    _undos += EconomyConfig.undoPackSize;
+    return true;
+  });
 
   bool useShuffle() {
     if (_shuffles <= 0) return false;
@@ -163,22 +203,23 @@ class PlayerProgress extends ChangeNotifier {
     return true;
   }
 
-  /// Gives back an item when the power-up could not actually be applied.
-  void refundShuffle() {
-    _shuffles++;
+  bool useUndo() {
+    if (_undos <= 0) return false;
+    _undos--;
     _commit();
+    return true;
   }
 
   // ---------------------------------------------------------------- levels
 
-  /// Records a win. Returns the coins awarded.
-  int completeLevel(int level, int stars, int coinReward) {
+  /// Records a win. Coins are paid only on the first clear of a level.
+  /// Returns the coins awarded.
+  int completeLevel(int level, int stars) {
     final best = _stars[level] ?? 0;
     final firstClear = best == 0;
     if (stars > best) _stars[level] = stars;
     if (level >= _unlockedLevel) _unlockedLevel = level + 1;
-    // Full reward on first clear, a smaller one for replays.
-    final reward = firstClear ? coinReward : (coinReward / 4).round();
+    final reward = firstClear ? EconomyConfig.levelReward(level, levelCount) : 0;
     _coins += reward;
     _commit();
     return reward;
@@ -191,26 +232,24 @@ class PlayerProgress extends ChangeNotifier {
 
   bool get canClaimDaily => _lastDailyClaim != _day(_now());
 
-  /// Day index (0-6) of the reward that is/was claimable today.
+  /// Streak day index (0-6) shown in the UI.
   int get dailyIndex {
-    if (!canClaimDaily) return (_dailyStreak - 1) % dailyRewards.length;
+    if (!canClaimDaily) return (_dailyStreak - 1) % streakDays;
     final yesterday = _day(_now().subtract(const Duration(days: 1)));
     final continues = _lastDailyClaim == yesterday;
-    return continues ? _dailyStreak % dailyRewards.length : 0;
+    return continues ? _dailyStreak % streakDays : 0;
   }
 
-  int get dailyAmount => dailyRewards[dailyIndex];
+  int get dailyAmount => EconomyConfig.dailyLoginReward;
 
   /// Returns the coins granted, or 0 if already claimed today.
   int claimDaily() {
     if (!canClaimDaily) return 0;
-    final index = dailyIndex;
-    final amount = dailyRewards[index];
-    _dailyStreak = index + 1;
+    _dailyStreak = dailyIndex + 1;
     _lastDailyClaim = _day(_now());
-    _coins += amount;
+    _coins += dailyAmount;
     _commit();
-    return amount;
+    return dailyAmount;
   }
 
   Duration get timeUntilNextDaily {
@@ -219,20 +258,54 @@ class PlayerProgress extends ChangeNotifier {
     return tomorrow.difference(n);
   }
 
+  // ---------------------------------------------------------------- surprise gifts
+
+  GiftReward? get lastGift => GiftConfig.byId(_lastGiftId);
+
+  Duration get timeUntilGift {
+    final last = _lastGiftAtMs;
+    if (last == null) return Duration.zero;
+    final remaining = last + EconomyConfig.giftCooldown.inMilliseconds - _now().millisecondsSinceEpoch;
+    // A clock moved backwards never shows more than one full cooldown.
+    return Duration(milliseconds: remaining.clamp(0, EconomyConfig.giftCooldown.inMilliseconds));
+  }
+
+  bool get canOpenGift => timeUntilGift == Duration.zero;
+
+  /// Opens today's gift: picks a reward, grants it and starts the cooldown in
+  /// one save. Returns null if the gift is not available yet.
+  GiftReward? openGift(Random random) {
+    if (!canOpenGift) return null;
+    final gift = GiftConfig.pick(random);
+    switch (gift.kind) {
+      case GiftKind.coins:
+        _coins += gift.amount;
+      case GiftKind.lives:
+        _regenerate();
+        _lives += gift.amount;
+        if (_lives >= maxLives) _nextLifeAtMs = null;
+      case GiftKind.extraBottles:
+        _extraBottles += gift.amount;
+      case GiftKind.shuffles:
+        _shuffles += gift.amount;
+    }
+    _lastGiftAtMs = _now().millisecondsSinceEpoch;
+    _lastGiftId = gift.id;
+    _commit();
+    return gift;
+  }
+
   // ---------------------------------------------------------------- settings
 
-  void setSound(bool v) {
-    soundOn = v;
-    _commit();
-  }
+  void setSound(bool v) => _set(() => soundOn = v);
+  void setMusic(bool v) => _set(() => musicOn = v);
+  void setSfxVolume(double v) => _set(() => sfxVolume = v.clamp(0, 1));
+  void setMusicVolume(double v) => _set(() => musicVolume = v.clamp(0, 1));
+  void setHaptics(bool v) => _set(() => hapticsOn = v);
+  void setReduceMotion(bool v) => _set(() => reduceMotion = v);
 
-  void setMusic(bool v) {
-    musicOn = v;
-    _commit();
-  }
-
-  void setHaptics(bool v) {
-    hapticsOn = v;
+  void _set(void Function() f) {
+    f();
     _commit();
   }
 
@@ -256,21 +329,30 @@ class PlayerProgress extends ChangeNotifier {
         m = {};
       }
     }
-    _coins = m['coins'] as int? ?? startingCoins;
-    _lives = m['lives'] as int? ?? maxLives;
-    _nextLifeAtMs = m['nextLifeAt'] as int?;
-    _unlockedLevel = m['unlocked'] as int? ?? 1;
+    int readInt(String k, int fallback) => max(0, (m[k] as num?)?.toInt() ?? fallback);
+    double readVol(String k) => ((m[k] as num?)?.toDouble() ?? 0.8).clamp(0, 1).toDouble();
+
+    _coins = readInt('coins', EconomyConfig.startingCoins);
+    _lives = readInt('lives', maxLives);
+    _nextLifeAtMs = (m['nextLifeAt'] as num?)?.toInt();
+    _unlockedLevel = max(1, readInt('unlocked', 1));
     _stars = {
       for (final e in (m['stars'] as Map<String, dynamic>? ?? {}).entries)
-        int.parse(e.key): e.value as int,
+        int.parse(e.key): (e.value as num).toInt(),
     };
-    _shuffles = m['shuffles'] as int? ?? 3;
-    _extraBottles = m['extraBottles'] as int? ?? 2;
+    _shuffles = readInt('shuffles', EconomyConfig.startingShuffles);
+    _extraBottles = readInt('extraBottles', EconomyConfig.startingExtraBottles);
+    _undos = readInt('undos', EconomyConfig.startingUndos);
     _lastDailyClaim = m['dailyClaim'] as String?;
-    _dailyStreak = m['dailyStreak'] as int? ?? 0;
+    _dailyStreak = readInt('dailyStreak', 0);
+    _lastGiftAtMs = (m['giftAt'] as num?)?.toInt();
+    _lastGiftId = m['giftId'] as String?;
     soundOn = m['sound'] as bool? ?? true;
     musicOn = m['music'] as bool? ?? true;
+    sfxVolume = readVol('sfxVolume');
+    musicVolume = readVol('musicVolume');
     hapticsOn = m['haptics'] as bool? ?? true;
+    reduceMotion = m['reduceMotion'] as bool? ?? false;
   }
 
   void _save() {
@@ -284,11 +366,17 @@ class PlayerProgress extends ChangeNotifier {
         'stars': {for (final e in _stars.entries) '${e.key}': e.value},
         'shuffles': _shuffles,
         'extraBottles': _extraBottles,
+        'undos': _undos,
         'dailyClaim': _lastDailyClaim,
         'dailyStreak': _dailyStreak,
+        'giftAt': _lastGiftAtMs,
+        'giftId': _lastGiftId,
         'sound': soundOn,
         'music': musicOn,
+        'sfxVolume': sfxVolume,
+        'musicVolume': musicVolume,
         'haptics': hapticsOn,
+        'reduceMotion': reduceMotion,
       }),
     );
   }

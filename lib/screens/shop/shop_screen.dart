@@ -6,6 +6,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/backgrounds.dart';
 import '../../core/widgets/game_button.dart';
 import '../../core/widgets/game_dialog.dart';
+import '../../audio/audio_service.dart';
+import '../../data/economy_config.dart';
 import '../../data/player_progress.dart';
 import '../home/top_bar.dart';
 
@@ -19,8 +21,10 @@ class ShopScreen extends StatelessWidget {
 
     void buy(bool Function() purchase, String done) {
       if (purchase()) {
+        AppScope.audioOf(context).play(Sfx.purchase);
         showToast(context, done);
       } else {
+        AppScope.audioOf(context).play(Sfx.invalid);
         showToast(context, 'Yeterli altının yok');
       }
     }
@@ -34,30 +38,49 @@ class ShopScreen extends StatelessWidget {
           const ScreenTitle('Mağaza', icon: Icons.storefront_rounded),
           const _Section('GÜÇLENDİRİCİLER'),
           _ShopItem(
+            icon: Icons.undo_rounded,
+            color: AppColors.turquoiseDark,
+            title: '${EconomyConfig.undoPackSize}x Geri Al',
+            subtitle: 'Sahip olunan: ${p.undos}',
+            price: EconomyConfig.undoPackPrice,
+            onBuy: () => buy(p.buyUndoPack, '${EconomyConfig.undoPackSize} geri alma eklendi'),
+          ),
+          _ShopItem(
             icon: Icons.shuffle_rounded,
             color: AppColors.violet,
-            title: '3x Karıştır',
+            title: '1x Karıştır',
             subtitle: 'Sahip olunan: ${p.shuffles}',
-            price: Prices.shuffle3,
-            onBuy: () => buy(p.buyShuffles, '3 karıştırma eklendi'),
+            price: EconomyConfig.shufflePrice,
+            onBuy: () => buy(p.buyShuffle, '1 karıştırma eklendi'),
           ),
           _ShopItem(
             icon: Icons.add_box_rounded,
             color: AppColors.gold,
-            title: '3x Ekstra Şişe',
+            title: '1x Ekstra Şişe',
             subtitle: 'Sahip olunan: ${p.extraBottles}',
-            price: Prices.extraBottle3,
-            onBuy: () => buy(p.buyExtraBottles, '3 ekstra şişe eklendi'),
+            price: EconomyConfig.extraBottlePrice,
+            onBuy: () => buy(p.buyExtraBottle, '1 ekstra şişe eklendi'),
+          ),
+          const _Section('CANLAR'),
+          _ShopItem(
+            icon: Icons.favorite_rounded,
+            color: AppColors.pink,
+            title: '1 Can',
+            subtitle: p.canBuyLife
+                ? '${p.lives}/${PlayerProgress.maxLives} can'
+                : 'Canların dolu',
+            price: EconomyConfig.oneLifePrice,
+            onBuy: p.canBuyLife ? () => buy(p.buyOneLife, '+1 can') : null,
           ),
           _ShopItem(
             icon: Icons.favorite_rounded,
             color: AppColors.pink,
             title: 'Canları Doldur',
-            subtitle: '${p.lives}/${PlayerProgress.maxLives} can',
-            price: Prices.refillLives,
-            onBuy: p.lives < PlayerProgress.maxLives
-                ? () => buy(p.buyLifeRefill, 'Canların doldu!')
-                : null,
+            subtitle: p.canBuyLife
+                ? '${PlayerProgress.maxLives - p.lives} can eklenir'
+                : 'Canların dolu',
+            price: p.canBuyLife ? p.refillPrice : EconomyConfig.fullLivesPrice,
+            onBuy: p.canBuyLife ? () => buy(p.buyLifeRefill, 'Canların doldu!') : null,
           ),
           const _Section('ALTIN PAKETLERİ'),
           const _ShopItem(

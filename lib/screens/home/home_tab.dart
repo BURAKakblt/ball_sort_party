@@ -4,16 +4,19 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../../audio/audio_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/backgrounds.dart';
 import '../../core/widgets/game_button.dart';
 import '../../core/widgets/game_dialog.dart';
+import '../../core/widgets/gift_box.dart';
 import '../../core/widgets/resource_chips.dart';
 import '../../data/player_progress.dart';
 import '../../game/engine/ball_type.dart';
 import '../../game/render/ball_painter.dart';
 import '../game/launch.dart';
+import '../gifts/gift_screen.dart';
 import 'top_bar.dart';
 
 class HomeTab extends StatelessWidget {
@@ -54,6 +57,8 @@ class HomeTab extends StatelessWidget {
                         ),
                         const SizedBox(height: 20),
                         const _DailyRewardCard(),
+                        const SizedBox(height: 12),
+                        const _GiftCard(),
                         const SizedBox(height: 16),
                       ],
                     ),
@@ -81,7 +86,13 @@ class _LogoState extends State<_Logo> with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(seconds: 3),
-  )..repeat();
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (!AppScope.read(context).reduceMotion) _c.repeat();
+  }
 
   @override
   void dispose() {
@@ -272,6 +283,7 @@ class _DailyRewardCardState extends State<_DailyRewardCard> {
     final p = AppScope.read(context);
     final amount = p.claimDaily();
     if (amount == 0) return;
+    AppScope.audioOf(context).play(Sfx.coin);
     await showGameDialog<void>(
       context,
       title: 'GÜNLÜK ÖDÜL!',
@@ -339,7 +351,7 @@ class _DailyRewardCardState extends State<_DailyRewardCard> {
             const SizedBox(height: 12),
             Row(
               children: [
-                for (var d = 0; d < PlayerProgress.dailyRewards.length; d++)
+                for (var d = 0; d < PlayerProgress.streakDays; d++)
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 2),
@@ -382,6 +394,86 @@ class _DayDot extends StatelessWidget {
       child: claimed
           ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
           : Text('$day', style: AppText.label.copyWith(fontSize: 11)),
+    );
+  }
+}
+
+/// Entry to the 48-hour surprise gifts, with availability / countdown.
+class _GiftCard extends StatelessWidget {
+  const _GiftCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final p = AppScope.of(context);
+    final can = p.canOpenGift;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 420),
+      child: GestureDetector(
+        onTap: () => Navigator.of(context).push(GameRoute(const GiftScreen())),
+        child: GlassPanel(
+          highlight: can ? AppColors.turquoise : null,
+          padding: const EdgeInsets.fromLTRB(10, 8, 14, 8),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 60,
+                height: 60,
+                child: CustomPaint(painter: GiftBoxPainter(palette: GiftPalette.all.first)),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('SÜRPRİZ HEDİYELER', style: AppText.label),
+                    const SizedBox(height: 2),
+                    const _GiftCountdown(),
+                  ],
+                ),
+              ),
+              Icon(
+                can ? Icons.redeem_rounded : Icons.chevron_right_rounded,
+                color: can ? AppColors.gold : AppColors.textMuted,
+                size: 30,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GiftCountdown extends StatefulWidget {
+  const _GiftCountdown();
+
+  @override
+  State<_GiftCountdown> createState() => _GiftCountdownState();
+}
+
+class _GiftCountdownState extends State<_GiftCountdown> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = AppScope.of(context);
+    return Text(
+      p.canOpenGift ? 'Ücretsiz kutun hazır!' : 'Sonraki kutu: ${formatDuration(p.timeUntilGift)}',
+      style: AppText.body.copyWith(fontSize: 13, color: p.canOpenGift ? AppColors.turquoise : null),
     );
   }
 }

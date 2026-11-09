@@ -5,6 +5,7 @@ import 'package:flame/game.dart';
 import 'package:flutter/painting.dart' show EdgeInsets;
 import 'package:flutter/services.dart';
 
+import '../engine/ball_type.dart';
 import '../engine/game_engine.dart';
 import 'components/ball_component.dart';
 import 'components/bottle_component.dart';
@@ -15,19 +16,30 @@ class BoardListener {
   const BoardListener({
     this.onChanged,
     this.onInvalid,
+    this.onSelected,
+    this.onBallLanded,
+    this.onBottleCompleted,
+    this.onWinStarted,
     this.onSolved,
-    this.onStuck,
+    this.onSettled,
   });
 
   /// Board state changed (move count, undo availability…).
   final VoidCallback? onChanged;
   final void Function(InvalidReason reason)? onInvalid;
+  final VoidCallback? onSelected;
+  final void Function(BallType type)? onBallLanded;
+  final VoidCallback? onBottleCompleted;
+
+  /// The winning ball landed; the victory animation starts.
+  final VoidCallback? onWinStarted;
 
   /// Fired after the victory animation has played.
   final VoidCallback? onSolved;
 
-  /// No valid moves are left.
-  final VoidCallback? onStuck;
+  /// A player move finished animating and no other transfer is in flight,
+  /// and the board is not won. The UI checks for failure here.
+  final VoidCallback? onSettled;
 }
 
 /// Renders a [GameEngine] and turns taps into animated moves.
@@ -39,13 +51,20 @@ class BallSortGame extends FlameGame {
     required this.engine,
     this.listener = const BoardListener(),
     this.hapticsEnabled = _alwaysTrue,
+    this.reduceMotion = _alwaysFalse,
   });
 
   static bool _alwaysTrue() => true;
+  static bool _alwaysFalse() => false;
 
   final GameEngine engine;
   final BoardListener listener;
   final bool Function() hapticsEnabled;
+  final bool Function() reduceMotion;
+
+  /// Transfers whose ball has not landed yet.
+  int _inFlight = 0;
+  bool get isAnimatingTransfer => _inFlight > 0;
 
   final List<BottleComponent> _bottles = [];
   final List<List<BallComponent>> _balls = [];
@@ -131,6 +150,7 @@ class BallSortGame extends FlameGame {
     _bottles.clear();
     _balls.clear();
     _celebrating = false;
+    _inFlight = 0; // removed balls never land
 
     final state = engine.state;
     _computeLayout(state.bottleCount);
@@ -142,6 +162,7 @@ class BallSortGame extends FlameGame {
           type: state.bottles[i][k],
           diameter: _d,
           position: _slot(i, k),
+          reduceMotion: reduceMotion(),
         );
         if (animateIn) ball.popIn(0.15 + i * 0.05 + k * 0.06);
         list.add(ball);
@@ -205,41 +226,55 @@ class BallSortGame extends FlameGame {
         _bottles[bottle].selected = true;
         _balls[bottle].last.lift(_liftPos(bottle));
         _haptic(HapticFeedback.selectionClick);
+        listener.onSelected?.call();
       case BallDeselected(:final bottle):
         _bottles[bottle].selected = false;
         final list = _balls[bottle];
         list.last.dropTo(_slot(bottle, list.length - 1));
       case BallMoved(:final move, :final completedBottle, :final solved):
         if (previous != null) _bottles[previous].selected = false;
-        _animateTransfer(move.from, move.to, onLand: () {
-          _haptic(HapticFeedback.lightImpact);
-          if (completedBottle != null) _completeBottle(completedBottle);
-          if (solved) {
-            _celebrate();
-          } else if (engine.isStuck) {
-            listener.onStuck?.call();
-          }
-        });
+        _animateTransfer(
+          move.from,
+          move.to,
+          onLand: () {
+            _haptic(HapticFeedback.lightImpact);
+            if (completedBottle != null) _completeBottle(completedBottle);
+            if (solved) _celebrate();
+          },
+          onSettled: () {
+            // Win is checked first; failure checks only on a still-open board.
+            if (_inFlight == 0 && !_celebrating && !engine.isSolved) {
+              listener.onSettled?.call();
+            }
+          },
+        );
         listener.onChanged?.call();
       case MoveRejected(:final target, :final reason, :final selected):
+        // Invalid input: never changes the board, only feedback.
         _bottles[target].shake();
         if (selected != null) _balls[selected].last.wiggle();
-        _haptic(HapticFeedback.mediumImpact);
+        _haptic(HapticFeedback.lightImpact);
         listener.onInvalid?.call(reason);
     }
   }
 
-  void _animateTransfer(int from, int to, {VoidCallback? onLand}) {
+  void _animateTransfer(int from, int to, {VoidCallback? onLand, VoidCallback? onSettled}) {
     final ball = _balls[from].removeLast();
     _balls[to].add(ball);
     ball.priority = 10; // fly above other balls
+    _inFlight++;
     ball.flyTo(
       liftPos: _liftPos(from),
       above: _liftPos(to),
       slot: _slot(to, _balls[to].length - 1),
       onLand: () {
         ball.priority = 5;
+        listener.onBallLanded?.call(ball.type);
         onLand?.call();
+      },
+      onSettled: () {
+        _inFlight--;
+        onSettled?.call();
       },
     );
   }
@@ -249,7 +284,12 @@ class BallSortGame extends FlameGame {
     bottle
       ..completed = true
       ..celebrate();
-    add(sparkleBurst(Vector2(_rects[index].center.dx, _rects[index].top), _d / 56));
+    listener.onBottleCompleted?.call();
+    add(sparkleBurst(
+      Vector2(_rects[index].center.dx, _rects[index].top),
+      _d / 56,
+      count: reduceMotion() ? 8 : 26,
+    ));
   }
 
   void _dropSelection() {
@@ -264,12 +304,13 @@ class BallSortGame extends FlameGame {
   void _celebrate() {
     _celebrating = true;
     _haptic(HapticFeedback.heavyImpact);
+    listener.onWinStarted?.call();
     var delay = 0.25;
     for (var i = 0; i < _balls.length; i++) {
       for (var k = _balls[i].length - 1; k >= 0; k--) {
         _balls[i][k].hop(delay + (_balls[i].length - 1 - k) * 0.05);
       }
-      if (_balls[i].isNotEmpty) {
+      if (_balls[i].isNotEmpty && !reduceMotion()) {
         final at = Vector2(_rects[i].center.dx, _rects[i].top);
         add(TimerComponent(
           period: delay + 0.2,

@@ -9,7 +9,10 @@ import '../../core/widgets/backgrounds.dart';
 import '../../core/widgets/game_button.dart';
 import '../../core/widgets/game_dialog.dart';
 import '../../core/widgets/resource_chips.dart';
+import '../../audio/audio_service.dart';
+import '../../data/economy_config.dart';
 import '../../data/player_progress.dart';
+import '../../services/rewarded_ad_service.dart';
 
 /// Shown when the player has no lives (or taps "+" on the lives chip).
 class OutOfLivesScreen extends StatefulWidget {
@@ -38,12 +41,14 @@ class _OutOfLivesScreenState extends State<OutOfLivesScreen> {
     super.dispose();
   }
 
-  void _refill() {
-    final p = AppScope.read(context);
-    if (p.buyLifeRefill()) {
-      showToast(context, 'Canların doldu!');
+  void _buy(bool Function() purchase, String done) {
+    final audio = AppScope.audioOf(context);
+    if (purchase()) {
+      audio.play(Sfx.life);
+      showToast(context, done);
       Navigator.of(context).pop();
     } else {
+      audio.play(Sfx.invalid);
       showToast(context, 'Yeterli altının yok');
     }
   }
@@ -111,20 +116,30 @@ class _OutOfLivesScreenState extends State<OutOfLivesScreen> {
                       ),
                       const Spacer(),
                       const SizedBox(height: 20),
+                      Text('Beklersen canların ücretsiz yenilenir.', style: AppText.body.copyWith(fontSize: 13)),
+                      const SizedBox(height: 12),
                       GameButton(
-                        label: 'DOLDUR  •  ${Prices.refillLives}',
+                        label: '+1 CAN  •  ${EconomyConfig.oneLifePrice}',
                         icon: Icons.favorite_rounded,
                         palette: ButtonPalette.gold,
-                        onPressed: p.lives < PlayerProgress.maxLives ? _refill : null,
+                        onPressed: p.canBuyLife ? () => _buy(p.buyOneLife, '+1 can!') : null,
                       ),
                       const SizedBox(height: 14),
-                      // Placeholder: rewarded ads are not integrated yet.
-                      const GameButton(
-                        label: 'REKLAM İZLE  +1 CAN',
-                        icon: Icons.ondemand_video_rounded,
-                        palette: ButtonPalette.purple,
-                        badge: 'YAKINDA',
+                      GameButton(
+                        label: p.canBuyLife
+                            ? 'DOLDUR (${PlayerProgress.maxLives - p.lives})  •  ${p.refillPrice}'
+                            : 'CANLAR DOLU',
+                        icon: Icons.favorite_rounded,
+                        palette: ButtonPalette.gold,
+                        onPressed: p.canBuyLife ? () => _buy(p.buyLifeRefill, 'Canların doldu!') : null,
                       ),
+                      const SizedBox(height: 14),
+                      // Rewarded ads are not integrated: the button stays disabled
+                      // until a RewardedAdService reports an ad as ready.
+                      _AdLifeButton(onRewarded: () => _buy(() {
+                        p.addLives(1);
+                        return true;
+                      }, '+1 can!')),
                       const SizedBox(height: 14),
                       GameButton(
                         label: 'ANA MENÜ',
@@ -141,6 +156,30 @@ class _OutOfLivesScreenState extends State<OutOfLivesScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AdLifeButton extends StatelessWidget {
+  const _AdLifeButton({required this.onRewarded});
+
+  final VoidCallback onRewarded;
+
+  @override
+  Widget build(BuildContext context) {
+    final ads = AppScope.adsOf(context);
+    final ready = ads.isReady(AdPlacement.extraLife);
+    return GameButton(
+      label: 'REKLAM İZLE  +1 CAN',
+      icon: Icons.ondemand_video_rounded,
+      palette: ButtonPalette.purple,
+      badge: ready ? null : 'YAKINDA',
+      onPressed: ready
+          ? () async {
+              // Reward only after the ad SDK confirms completion.
+              if (await ads.show(AdPlacement.extraLife) == AdResult.completed) onRewarded();
+            }
+          : null,
     );
   }
 }

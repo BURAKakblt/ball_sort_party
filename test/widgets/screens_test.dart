@@ -77,6 +77,21 @@ void main() {
     await tester.tap(find.text('AL'));
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('GÜNLÜK ÖDÜL!'), findsOneWidget);
-    expect(p.coins, PlayerProgress.startingCoins + PlayerProgress.dailyRewards.first);
+    expect(p.coins, PlayerProgress.startingCoins + 50);
+  });
+
+  testWidgets('settings switches change and persist audio preferences', (tester) async {
+    final p = await _progress();
+    await _pump(tester, const Size(430, 932), const SettingsScreen(), p);
+    expect(find.text('Arka Plan Müziği'), findsOneWidget);
+    expect(find.byType(Slider), findsNWidgets(2));
+    await tester.tap(find.byType(Switch).at(0)); // music
+    await tester.tap(find.byType(Switch).at(1)); // effects
+    await tester.pump();
+    expect(p.musicOn, isFalse);
+    expect(p.soundOn, isFalse);
+    final reloaded = await PlayerProgress.load();
+    expect(reloaded.musicOn, isFalse);
+    expect(reloaded.soundOn, isFalse);
   });
 }

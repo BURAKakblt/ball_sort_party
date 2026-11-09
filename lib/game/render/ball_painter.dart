@@ -10,17 +10,30 @@ import '../engine/ball_type.dart';
 /// Pictures are cached per (type, radius) so the board can redraw cheaply
 /// every frame.
 abstract final class BallArt {
-  static final Map<(BallType, int), ui.Picture> _cache = {};
+  static final Map<(BallType, int), (ui.Picture, ui.Picture)> _cache = {};
 
   /// Draws [type] centered at the canvas origin with radius [r].
-  static void draw(Canvas canvas, BallType type, double r) {
+  /// [rotation] spins the ball's pattern while lighting stays fixed.
+  static void draw(Canvas canvas, BallType type, double r, {double rotation = 0}) {
     final key = (type, (r * 4).round());
-    final picture = _cache.putIfAbsent(key, () {
-      final recorder = ui.PictureRecorder();
-      _paint(Canvas(recorder), type, r);
-      return recorder.endRecording();
+    final (body, shade) = _cache.putIfAbsent(key, () {
+      ui.Picture record(void Function(Canvas) paint) {
+        final recorder = ui.PictureRecorder();
+        paint(Canvas(recorder));
+        return recorder.endRecording();
+      }
+
+      return (record((c) => _paintBody(c, type, r)), record((c) => _paintShade(c, type, r)));
     });
-    canvas.drawPicture(picture);
+    if (rotation != 0) {
+      canvas.save();
+      canvas.rotate(rotation);
+      canvas.drawPicture(body);
+      canvas.restore();
+    } else {
+      canvas.drawPicture(body);
+    }
+    canvas.drawPicture(shade);
   }
 
   /// Soft contact shadow under a ball.
@@ -33,7 +46,8 @@ abstract final class BallArt {
     );
   }
 
-  static void _paint(Canvas canvas, BallType type, double r) {
+  /// Base color and pattern (rotatable).
+  static void _paintBody(Canvas canvas, BallType type, double r) {
     final circle = Rect.fromCircle(center: Offset.zero, radius: r);
     final spec = _specs[type]!;
 
@@ -64,6 +78,15 @@ abstract final class BallArt {
       case BallType.volleyball:
         _volleyball(canvas, r);
     }
+    canvas.restore();
+  }
+
+  /// Lighting: core shadow, rim light, highlights and outline (fixed).
+  static void _paintShade(Canvas canvas, BallType type, double r) {
+    final circle = Rect.fromCircle(center: Offset.zero, radius: r);
+    final spec = _specs[type]!;
+    canvas.save();
+    canvas.clipPath(Path()..addOval(circle));
 
     // Core shadow towards the bottom-right for volume.
     canvas.drawRect(

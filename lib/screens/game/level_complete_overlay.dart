@@ -19,6 +19,7 @@ class LevelCompleteOverlay extends StatefulWidget {
     required this.coins,
     required this.moves,
     required this.onReplay,
+    this.reduceMotion = false,
   });
 
   final Level level;
@@ -26,6 +27,7 @@ class LevelCompleteOverlay extends StatefulWidget {
   final int coins;
   final int moves;
   final VoidCallback onReplay;
+  final bool reduceMotion;
 
   @override
   State<LevelCompleteOverlay> createState() => _LevelCompleteOverlayState();
@@ -85,6 +87,8 @@ class _LevelCompleteOverlayState extends State<LevelCompleteOverlay> with Single
                         ),
                       ),
                       Text('Bölüm ${widget.level.number} tamamlandı', style: AppText.body),
+                      if (widget.coins == 0)
+                        Text('Tekrar oynamada altın ödülü verilmez', style: AppText.body.copyWith(fontSize: 12)),
                       const SizedBox(height: 16),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -186,7 +190,7 @@ class _LevelCompleteOverlayState extends State<LevelCompleteOverlay> with Single
             ),
           ),
         ),
-        const Positioned.fill(child: ConfettiBurst()),
+        Positioned.fill(child: ConfettiBurst(count: widget.reduceMotion ? 30 : 140)),
       ],
     );
   }

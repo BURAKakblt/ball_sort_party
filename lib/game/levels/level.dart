@@ -33,7 +33,4 @@ class Level {
     if (moves <= (par * 1.5).ceil() + 3) return 2;
     return 1;
   }
-
-  /// Coins awarded on completion.
-  int get coinReward => 20 + number * 5;
 }

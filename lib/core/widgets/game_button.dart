@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app.dart';
+import '../../audio/audio_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 
@@ -114,7 +116,7 @@ class _GameButtonState extends State<GameButton> {
       onTapUp: enabled
           ? (_) {
               setState(() => _down = false);
-              HapticFeedback.lightImpact();
+              _feedback(context);
               widget.onPressed!();
             }
           : null,
@@ -268,7 +270,7 @@ class _RoundIconButtonState extends State<RoundIconButton> {
       onTapUp: enabled
           ? (_) {
               setState(() => _down = false);
-              HapticFeedback.lightImpact();
+              _feedback(context);
               widget.onPressed!();
             }
           : null,
@@ -329,4 +331,11 @@ class SoonBadge extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Click sound + light haptic (respecting settings) for shared buttons.
+void _feedback(BuildContext context) {
+  AppScope.audioOf(context).play(Sfx.button);
+  final scope = context.getInheritedWidgetOfExactType<AppScope>();
+  if (scope?.notifier?.hapticsOn ?? true) HapticFeedback.lightImpact();
 }

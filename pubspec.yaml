@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   flame: ^1.38.2
   shared_preferences: ^2.5.6
+  audioplayers: ^6.8.1
 
 dev_dependencies:
   flutter_test:
@@ -58,6 +59,10 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/audio/sfx/
+    - assets/audio/music/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

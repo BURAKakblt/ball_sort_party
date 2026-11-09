@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../../audio/audio_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/backgrounds.dart';
@@ -29,6 +30,7 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = AppScope.of(context);
+    final missing = AppScope.audioOf(context).missingAssets;
     return Scaffold(
       body: GradientBackground(
         child: SafeArea(
@@ -49,6 +51,54 @@ class SettingsScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 20),
+              const _SectionLabel('SES'),
+              GlassPanel(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                child: Column(
+                  children: [
+                    _ToggleRow(
+                      icon: Icons.music_note_rounded,
+                      label: 'Arka Plan Müziği',
+                      value: p.musicOn,
+                      onChanged: p.setMusic,
+                    ),
+                    _VolumeRow(
+                      label: 'Müzik seviyesi',
+                      value: p.musicVolume,
+                      enabled: p.musicOn,
+                      onChanged: p.setMusicVolume,
+                    ),
+                    const _Divider(),
+                    _ToggleRow(
+                      icon: Icons.volume_up_rounded,
+                      label: 'Efekt Sesleri',
+                      value: p.soundOn,
+                      onChanged: p.setSound,
+                    ),
+                    _VolumeRow(
+                      label: 'Efekt seviyesi',
+                      value: p.sfxVolume,
+                      enabled: p.soundOn,
+                      onChanged: p.setSfxVolume,
+                      // Preview the level on release.
+                      onChangeEnd: (_) => AppScope.audioOf(context).play(Sfx.coin),
+                    ),
+                  ],
+                ),
+              ),
+              if (missing.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                GlassPanel(
+                  highlight: AppColors.pink,
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    'Bazı ses dosyaları yüklenemedi:\n${missing.join('\n')}',
+                    style: AppText.body.copyWith(fontSize: 12),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              const _SectionLabel('OYUN'),
               GlassPanel(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 child: Column(
@@ -60,22 +110,11 @@ class SettingsScreen extends StatelessWidget {
                       onChanged: p.setHaptics,
                     ),
                     const _Divider(),
-                    // Placeholder: there are no audio assets yet; the
-                    // preference is saved for when sound is added.
                     _ToggleRow(
-                      icon: Icons.volume_up_rounded,
-                      label: 'Ses Efektleri',
-                      value: p.soundOn,
-                      onChanged: p.setSound,
-                      soon: true,
-                    ),
-                    const _Divider(),
-                    _ToggleRow(
-                      icon: Icons.music_note_rounded,
-                      label: 'Müzik',
-                      value: p.musicOn,
-                      onChanged: p.setMusic,
-                      soon: true,
+                      icon: Icons.motion_photos_off_rounded,
+                      label: 'Animasyonları Azalt',
+                      value: p.reduceMotion,
+                      onChanged: p.setReduceMotion,
                     ),
                   ],
                 ),
@@ -119,39 +158,89 @@ class _Divider extends StatelessWidget {
       Divider(height: 1, color: Colors.white.withValues(alpha: 0.12));
 }
 
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
+    child: Text(text, style: AppText.label.copyWith(color: AppColors.textMuted, letterSpacing: 1.2)),
+  );
+}
+
 class _ToggleRow extends StatelessWidget {
   const _ToggleRow({
     required this.icon,
     required this.label,
     required this.value,
     required this.onChanged,
-    this.soon = false,
   });
 
   final IconData icon;
   final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
-  final bool soon;
 
   @override
   Widget build(BuildContext context) {
     return _InfoRow(
       icon: icon,
       label: label,
-      badge: soon,
       trailing: Switch(value: value, onChanged: onChanged),
     );
   }
 }
 
+class _VolumeRow extends StatelessWidget {
+  const _VolumeRow({
+    required this.label,
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+    this.onChangeEnd,
+  });
+
+  final String label;
+  final double value;
+  final bool enabled;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double>? onChangeEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const SizedBox(width: 36),
+        Expanded(
+          child: Semantics(
+            label: label,
+            child: Slider(
+              value: value,
+              onChanged: enabled ? onChanged : null,
+              onChangeEnd: onChangeEnd,
+              activeColor: AppColors.turquoise,
+              inactiveColor: Colors.white24,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 44,
+          child: Text('%${(value * 100).round()}', style: AppText.label, textAlign: TextAlign.end),
+        ),
+      ],
+    );
+  }
+}
+
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.icon, required this.label, required this.trailing, this.badge = false});
+  const _InfoRow({required this.icon, required this.label, required this.trailing});
+
 
   final IconData icon;
   final String label;
   final Widget trailing;
-  final bool badge;
 
   @override
   Widget build(BuildContext context) {
@@ -161,9 +250,8 @@ class _InfoRow extends StatelessWidget {
         children: [
           Icon(icon, color: AppColors.turquoise),
           const SizedBox(width: 12),
-          Flexible(child: Text(label, style: AppText.label.copyWith(fontSize: 15), overflow: TextOverflow.ellipsis)),
-          if (badge) ...[const SizedBox(width: 8), const SoonBadge()],
-          const Spacer(),
+          Expanded(child: Text(label, style: AppText.label.copyWith(fontSize: 15), overflow: TextOverflow.ellipsis)),
+          const SizedBox(width: 8),
           trailing,
         ],
       ),

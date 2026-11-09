@@ -1,14 +1,25 @@
 import 'package:flutter/material.dart';
 
+import 'audio/audio_service.dart';
 import 'core/theme/app_theme.dart';
 import 'data/player_progress.dart';
 import 'screens/home/main_shell.dart';
+import 'services/rewarded_ad_service.dart';
 
 /// Makes [PlayerProgress] available to the widget tree and rebuilds
 /// dependents when it changes.
 class AppScope extends InheritedNotifier<PlayerProgress> {
-  const AppScope({super.key, required PlayerProgress progress, required super.child})
-    : super(notifier: progress);
+  AppScope({
+    super.key,
+    required PlayerProgress progress,
+    AudioService? audio,
+    this.ads = const UnavailableRewardedAdService(),
+    required super.child,
+  }) : audio = audio ?? AudioService.disabled(),
+       super(notifier: progress);
+
+  final AudioService audio;
+  final RewardedAdService ads;
 
   static PlayerProgress of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!.notifier!;
@@ -16,17 +27,28 @@ class AppScope extends InheritedNotifier<PlayerProgress> {
   /// Access without subscribing to rebuilds (for callbacks).
   static PlayerProgress read(BuildContext context) =>
       context.getInheritedWidgetOfExactType<AppScope>()!.notifier!;
+
+  static AudioService audioOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<AppScope>()?.audio ?? _silent;
+
+  static RewardedAdService adsOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<AppScope>()?.ads ??
+      const UnavailableRewardedAdService();
+
+  static final _silent = AudioService.disabled();
 }
 
 class BallSortPartyApp extends StatelessWidget {
-  const BallSortPartyApp({super.key, required this.progress});
+  const BallSortPartyApp({super.key, required this.progress, this.audio});
 
   final PlayerProgress progress;
+  final AudioService? audio;
 
   @override
   Widget build(BuildContext context) {
     return AppScope(
       progress: progress,
+      audio: audio,
       child: MaterialApp(
         title: 'Ball Sort Party',
         debugShowCheckedModeBanner: false,
