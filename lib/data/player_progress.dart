@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../game/levels/level_data.dart';
 import '../game/session/level_run.dart';
+import '../cloud/cloud_models.dart';
+import '../cloud/progress_merge.dart';
 import 'economy_config.dart';
 import 'gift_config.dart';
 import 'progress_store.dart';
@@ -75,6 +77,12 @@ class PlayerProgress extends ChangeNotifier {
   /// signature: they are kept as the player's history but count as "legacy"
   /// and the next completion replaces them.
   late Map<int, String> _starSigs;
+
+  /// Last completion time per level (for cross-device sync).
+  late Map<int, int> _completedAt;
+
+  /// Random id of this installation (not personal data); tags cloud writes.
+  late String deviceId;
   static const legacyStarSig = 'legacy';
   late int _shuffles;
   late int _extraBottles;
@@ -309,6 +317,7 @@ class PlayerProgress extends ChangeNotifier {
       _stars[level] = stars;
       _starSigs[level] = _currentSig(level) ?? legacyStarSig;
     }
+    _completedAt[level] = _now().millisecondsSinceEpoch;
     if (level >= _unlockedLevel) _unlockedLevel = min(level + 1, levelCount + 1);
     final reward = firstClear ? EconomyConfig.levelReward(level, levelCount) : 0;
     _coins += reward;
@@ -329,7 +338,7 @@ class PlayerProgress extends ChangeNotifier {
   /// PLAYING one here (use [recoverLevel]). Returns false if rejected.
   bool saveRun(int level, LevelRun run) {
     if (isLevelFailed(level) && !run.isFailed) return false;
-    _runs[level] = run;
+    _runs[level] = _stamp(level, run);
     _commit();
     return true;
   }
@@ -337,10 +346,14 @@ class PlayerProgress extends ChangeNotifier {
   /// FAILED → PLAYING after a successful rescue (undo / coins / ad).
   bool recoverLevel(int level, LevelRun run) {
     if (!isLevelFailed(level) || run.isFailed) return false;
-    _runs[level] = run;
+    _runs[level] = _stamp(level, run);
     _commit();
     return true;
   }
+
+  /// Every save of a level's attempt gets the next revision number.
+  LevelRun _stamp(int level, LevelRun run) =>
+      run.stamped((_runs[level]?.rev ?? 0) + 1, _now().millisecondsSinceEpoch);
 
   /// Manual restart during normal play: free. Not allowed while FAILED.
   bool discardRun(int level) {
@@ -363,6 +376,77 @@ class PlayerProgress extends ChangeNotifier {
     _runs.remove(level);
     _commit();
     return true;
+  }
+
+  // ---------------------------------------------------------------- cloud sync
+
+  static String _newDeviceId() {
+    final r = Random.secure();
+    return List.generate(16, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  /// Signature of each level's current layout.
+  static Map<int, String> get currentLevelSigs => {
+    for (final l in kLevels) l.number: LevelRun.signatureOf(l.layout),
+  };
+
+  /// Progress that may be synced (no economy values).
+  CloudProgress exportCloudProgress() => CloudProgress(
+    unlockedLevel: _unlockedLevel,
+    levels: {
+      for (final e in _stars.entries)
+        e.key: CloudLevelRecord(
+          stars: e.value,
+          sig: _starSigs[e.key] ?? legacyStarSig,
+          completedAtMs: _completedAt[e.key],
+        ),
+    },
+    runs: Map.of(_runs),
+    updatedAtMs: _now().millisecondsSinceEpoch,
+    deviceId: deviceId,
+  );
+
+  /// Applies merged cloud progress. Only ever moves progress FORWARD (more
+  /// unlocks, better or current-layout stars, newer attempts, FAILED kept)
+  /// and never changes coins, lives, items or rewards: levels cleared on
+  /// another device are marked cleared here without paying coins again.
+  /// Returns true if anything changed.
+  bool applyCloudProgress(CloudProgress cloud) {
+    final merged = ProgressMerge(currentLevelSigs).merge(exportCloudProgress(), cloud);
+    var changed = false;
+    return transaction(() {
+      if (merged.unlockedLevel > _unlockedLevel) {
+        _unlockedLevel = min(merged.unlockedLevel, levelCount + 1);
+        changed = true;
+      }
+      for (final e in merged.levels.entries) {
+        final n = e.key, r = e.value;
+        if (n < 1 || n > levelCount) continue;
+        if (_stars[n] != r.stars || _starSigs[n] != r.sig) {
+          _stars[n] = r.stars;
+          _starSigs[n] = r.sig;
+          changed = true;
+        }
+        if (r.completedAtMs != null && _completedAt[n] != r.completedAtMs) {
+          _completedAt[n] = r.completedAtMs!;
+          changed = true;
+        }
+      }
+      for (final n in {..._runs.keys, ...merged.runs.keys}) {
+        final run = merged.runs[n];
+        if (run == null) {
+          if (_runs.remove(n) != null) changed = true; // finished on another device
+        } else if (run.isValidFor(kLevels[n - 1]) && !identical(run, _runs[n])) {
+          final local = _runs[n];
+          if (local == null || local.rev != run.rev || local.isFailed != run.isFailed) {
+            _runs[n] = run;
+            changed = true;
+          }
+        }
+      }
+      if (changed) _commit();
+      return changed;
+    });
   }
 
   // ---------------------------------------------------------------- daily reward
@@ -482,6 +566,15 @@ class PlayerProgress extends ChangeNotifier {
       final sig = sigs['$level'];
       _starSigs[level] = sig is String ? sig : legacyStarSig;
     }
+    _completedAt = {};
+    final completed = pick<Map>('completedAt') ?? const {};
+    for (final e in completed.entries) {
+      final level = int.tryParse('${e.key}');
+      if (level != null && _stars.containsKey(level) && e.value is num) {
+        _completedAt[level] = (e.value as num).toInt();
+      }
+    }
+    deviceId = pick<String>('deviceId') ?? _newDeviceId();
     // Never lock a level the player has already cleared.
     for (final level in _stars.keys) {
       if (level >= _unlockedLevel) _unlockedLevel = min(level + 1, kLevels.length + 1);
@@ -552,6 +645,8 @@ class PlayerProgress extends ChangeNotifier {
         'unlocked': _unlockedLevel,
         'stars': {for (final e in _stars.entries) '${e.key}': e.value},
         'starSigs': {for (final e in _starSigs.entries) '${e.key}': e.value},
+        'completedAt': {for (final e in _completedAt.entries) '${e.key}': e.value},
+        'deviceId': deviceId,
         'shuffles': _shuffles,
         'extraBottles': _extraBottles,
         'undos': _undos,

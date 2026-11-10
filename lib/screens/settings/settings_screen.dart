@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app.dart';
 import '../../audio/audio_service.dart';
+import '../../cloud/sync_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/backgrounds.dart';
@@ -97,6 +98,9 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
               ],
+              const SizedBox(height: 16),
+              const _SectionLabel('BULUT KAYIT'),
+              const _CloudSaveCard(),
               const SizedBox(height: 16),
               const _SectionLabel('OYUN'),
               GlassPanel(
@@ -255,6 +259,81 @@ class _InfoRow extends StatelessWidget {
           trailing,
         ],
       ),
+    );
+  }
+}
+
+/// Honest cloud-save status: never claims a sync that didn't happen.
+class _CloudSaveCard extends StatelessWidget {
+  const _CloudSaveCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final sync = AppScope.syncOf(context);
+    if (sync == null) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: sync,
+      builder: (context, _) {
+        final (icon, color, title) = switch (sync.status) {
+          SyncStatus.notConfigured => (Icons.cloud_off_rounded, AppColors.textMuted, 'Yapılandırılmadı'),
+          SyncStatus.connecting => (Icons.cloud_queue_rounded, AppColors.textMuted, 'Bağlanıyor'),
+          SyncStatus.syncing => (Icons.cloud_sync_rounded, AppColors.turquoise, 'Eşitleniyor'),
+          SyncStatus.idle => (Icons.cloud_done_rounded, AppColors.turquoise, 'Eşitlendi'),
+          SyncStatus.offline => (Icons.cloud_off_rounded, AppColors.gold, 'Çevrimdışı'),
+          SyncStatus.error => (Icons.error_outline_rounded, AppColors.pink, 'Eşitleme hatası'),
+        };
+        final user = sync.user;
+        final last = sync.lastSyncedAt;
+        return GlassPanel(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, color: color),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(title, style: AppText.label.copyWith(fontSize: 15))),
+                  if (sync.isConfigured)
+                    TextButton(
+                      onPressed: sync.status == SyncStatus.syncing ? null : () => sync.syncNow(force: true),
+                      child: const Text('Şimdi eşitle'),
+                    ),
+                ],
+              ),
+              if (sync.detail != null) ...[
+                const SizedBox(height: 6),
+                Text(sync.detail!, style: AppText.body.copyWith(fontSize: 13)),
+              ],
+              if (sync.status == SyncStatus.idle && last != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Son eşitleme: ${last.hour.toString().padLeft(2, '0')}:${last.minute.toString().padLeft(2, '0')}',
+                  style: AppText.body.copyWith(fontSize: 13),
+                ),
+              ],
+              if (sync.hasPendingChanges && sync.status != SyncStatus.notConfigured) ...[
+                const SizedBox(height: 4),
+                Text('Gönderilmeyi bekleyen değişiklikler var', style: AppText.body.copyWith(fontSize: 13)),
+              ],
+              if (user != null && user.isAnonymous) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Misafir oyuncu: hesap bağlanmadan cihaz değişiminde veya uygulama silindiğinde kayıt geri yüklenemez.',
+                  style: AppText.body.copyWith(fontSize: 13, color: AppColors.gold),
+                ),
+              ],
+              const SizedBox(height: 10),
+              const Row(
+                children: [
+                  Expanded(child: Text('Apple / Google hesabı bağla', style: AppText.label)),
+                  SoonBadge(),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

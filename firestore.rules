@@ -1,0 +1,79 @@
+rules_version = '2';
+
+// Ball Sort Party — Firestore Security Rules
+//
+// Data ownership:
+//   users/{uid}/progress/main   player-writable (validated, can't regress)
+//   users/{uid}/economy/*       SERVER ONLY (coins, lives, items) — read-only
+//   users/{uid}/purchases/*     SERVER ONLY (store receipts)       — read-only
+// Everything else is denied.
+//
+// Coins, lives and purchase rights can only change through Cloud Functions
+// (Admin SDK bypasses these rules after validating the request + App Check).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // Level ids "1".."50" (must match kLevels.length).
+    function levelIds() {
+      return ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
+              '11', '12', '13', '14', '15', '16', '17', '18', '19', '20',
+              '21', '22', '23', '24', '25', '26', '27', '28', '29', '30',
+              '31', '32', '33', '34', '35', '36', '37', '38', '39', '40',
+              '41', '42', '43', '44', '45', '46', '47', '48', '49', '50'];
+    }
+
+    function validProgress(d) {
+      return d.keys().hasOnly(['schema', 'unlockedLevel', 'levels', 'runs',
+                               'updatedAtMs', 'deviceId', 'serverUpdatedAt'])
+        && d.keys().hasAll(['schema', 'unlockedLevel', 'levels', 'runs', 'serverUpdatedAt'])
+        && d.schema == 1
+        && d.unlockedLevel is int && d.unlockedLevel >= 1 && d.unlockedLevel <= 51
+        && d.levels is map && d.levels.keys().hasOnly(levelIds())
+        && d.runs is map && d.runs.keys().hasOnly(levelIds())
+        && (!('updatedAtMs' in d) || d.updatedAtMs is int)
+        && (!('deviceId' in d) || (d.deviceId is string && d.deviceId.size() <= 64))
+        && d.serverUpdatedAt == request.time;
+    }
+
+    // Monotonic: unlocks and cleared levels can never decrease.
+    function notRegressing(newData, oldData) {
+      return newData.unlockedLevel >= oldData.unlockedLevel
+        && newData.levels.keys().hasAll(oldData.levels.keys());
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false; // profile is created by the server
+
+      match /progress/{docId} {
+        allow read: if isOwner(uid) && docId == 'main';
+        allow create: if isOwner(uid) && docId == 'main'
+          && validProgress(request.resource.data);
+        allow update: if isOwner(uid) && docId == 'main'
+          && validProgress(request.resource.data)
+          && notRegressing(request.resource.data, resource.data);
+        allow delete: if false;
+      }
+
+      // Server-authoritative economy: the client may only read it.
+      match /economy/{docId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      match /purchases/{purchaseId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+    }
+
+    // Deny everything not listed above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "ball-sort-party-rules-tests",
+  "private": true,
+  "type": "module",
+  "description": "Firestore Security Rules tests. Run via: firebase emulators:exec --only firestore --project demo-ball-sort-party \"npm --prefix test-rules test\"",
+  "scripts": {
+    "test": "node --test firestore.rules.test.mjs"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.0.0"
+  }
+}

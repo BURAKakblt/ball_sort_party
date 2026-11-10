@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'audio/audio_service.dart';
+import 'cloud/sync_service.dart';
 import 'core/theme/app_theme.dart';
 import 'data/player_progress.dart';
 import 'screens/home/main_shell.dart';
@@ -14,12 +15,16 @@ class AppScope extends InheritedNotifier<PlayerProgress> {
     required PlayerProgress progress,
     AudioService? audio,
     this.ads = const UnavailableRewardedAdService(),
+    this.sync,
     required super.child,
   }) : audio = audio ?? AudioService.disabled(),
        super(notifier: progress);
 
   final AudioService audio;
   final RewardedAdService ads;
+
+  /// Cloud save (null in tests / when not created).
+  final SyncService? sync;
 
   static PlayerProgress of(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<AppScope>()!.notifier!;
@@ -31,6 +36,9 @@ class AppScope extends InheritedNotifier<PlayerProgress> {
   static AudioService audioOf(BuildContext context) =>
       context.getInheritedWidgetOfExactType<AppScope>()?.audio ?? _silent;
 
+  static SyncService? syncOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<AppScope>()?.sync;
+
   static RewardedAdService adsOf(BuildContext context) =>
       context.getInheritedWidgetOfExactType<AppScope>()?.ads ??
       const UnavailableRewardedAdService();
@@ -39,16 +47,18 @@ class AppScope extends InheritedNotifier<PlayerProgress> {
 }
 
 class BallSortPartyApp extends StatelessWidget {
-  const BallSortPartyApp({super.key, required this.progress, this.audio});
+  const BallSortPartyApp({super.key, required this.progress, this.audio, this.sync});
 
   final PlayerProgress progress;
   final AudioService? audio;
+  final SyncService? sync;
 
   @override
   Widget build(BuildContext context) {
     return AppScope(
       progress: progress,
       audio: audio,
+      sync: sync,
       child: MaterialApp(
         title: 'Ball Sort Party',
         debugShowCheckedModeBanner: false,

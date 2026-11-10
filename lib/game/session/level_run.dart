@@ -18,6 +18,8 @@ class LevelRun {
     this.failReason,
     this.failId,
     this.levelSig,
+    this.rev = 0,
+    this.updatedAtMs,
   });
 
   /// Signature of a level's starting layout. Saved with every attempt so an
@@ -59,6 +61,27 @@ class LevelRun {
   /// written before this field existed).
   final String? levelSig;
 
+  /// Save counter, +1 on every save of this level's attempt. Used to resolve
+  /// conflicts between devices (cloud sync): higher revision wins.
+  final int rev;
+
+  /// When this attempt was last saved (device clock; informational).
+  final int? updatedAtMs;
+
+  /// Same attempt with a new revision / timestamp.
+  LevelRun stamped(int rev, int updatedAtMs) => LevelRun(
+    status: status,
+    layout: layout,
+    history: history,
+    moveCount: moveCount,
+    extraBottlesAdded: extraBottlesAdded,
+    failReason: failReason,
+    failId: failId,
+    levelSig: levelSig,
+    rev: rev,
+    updatedAtMs: updatedAtMs,
+  );
+
   bool get isFailed => status == LevelStatus.failed;
 
   LevelRun copyWith({LevelStatus? status, BoardStatus? failReason}) => LevelRun(
@@ -70,6 +93,8 @@ class LevelRun {
     failReason: failReason ?? this.failReason,
     failId: failId,
     levelSig: levelSig,
+    rev: rev,
+    updatedAtMs: updatedAtMs,
   );
 
   /// Rebuilds the engine for [level].
@@ -118,6 +143,8 @@ class LevelRun {
     'extra': extraBottlesAdded,
     if (failId != null) 'failId': failId,
     if (levelSig != null) 'sig': levelSig,
+    if (rev > 0) 'rev': rev,
+    if (updatedAtMs != null) 'at': updatedAtMs,
   };
 
   static LevelRun? fromJson(Object? json) {
@@ -138,6 +165,8 @@ class LevelRun {
         extraBottlesAdded: (json['extra'] as num).toInt(),
         failId: json['failId'] as String?,
         levelSig: json['sig'] as String?,
+        rev: (json['rev'] as num?)?.toInt() ?? 0,
+        updatedAtMs: (json['at'] as num?)?.toInt(),
       );
     } catch (_) {
       return null;

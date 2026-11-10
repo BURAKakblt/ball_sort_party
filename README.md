@@ -67,6 +67,12 @@ audioplayers iOS'ta döngüyü "bitti → başa sar → çal" ile yaptığı iç
 iOS'ta müzik `ios/Runner/AppDelegate.swift` içindeki küçük `GaplessMusicPlugin` (AVAudioPlayer,
 `numberOfLoops = -1`) ile çalınır; başarısız olursa audioplayers'a düşer. Android: MediaPlayer yerel döngü.
 
+## Bulut kayıt (Firebase)
+
+İstemci altyapısı hazır, **Firebase projesi henüz bağlı değil** — oyun tamamen
+çevrimdışı çalışır. Mimari, şema, birleştirme kuralları, güvenlik kuralları ve
+kurulum adımları: [docs/cloud/README.md](docs/cloud/README.md).
+
 ## Güvenlik notu
 
 Ekonomi tamamen cihazda tutulur. Cihaz saatini değiştirmek can/hediye sayaçlarını
