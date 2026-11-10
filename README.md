@@ -22,7 +22,7 @@ flutter test
 ```
 lib/
   game/engine/     Saf Dart kurallar motoru (GameState, GameEngine, Solver) – animasyondan bağımsız
-  game/levels/     10 seviye (level_data.dart) + Level modeli
+  game/levels/     50 seviye (level_data.dart), zorluk bantları, Level modeli, difficulty.dart
   game/render/     Prosedürel 2.5D top çizimi (görsel dosya yok)
   game/flame/      Flame tahtası: şişeler, toplar, animasyonlar, parçacıklar
   data/            PlayerProgress (kayıt), EconomyConfig (tüm fiyat/ödüller), GiftConfig (hediye olasılıkları)
@@ -34,7 +34,15 @@ tool/level_tool.dart   Seviye üretici + BFS ile optimum hamle (par) hesaplayıc
 tool/gen_audio.dart    Tüm müzik ve efektleri sıfırdan sentezler (assets/audio/CREDITS.md)
 tool/level_metrics.dart  Seviye zorluk raporu (par, durum sayısı, çıkmaz %, sıradan oyuncu başarı %)
 tool/level_search.dart   Zorluk hedefine uyan dizilim arar
+tool/level_gen.dart      50 seviyeyi gruplar halinde üretir (kanıtlanmış çözülebilirlik, tekrar/benzerlik filtresi)
 ```
+
+## Seviyeler
+
+50 seviye, 5 zorluk bandı: Başlangıç (1–5), Kolay (6–10), Orta (11–20), Orta-Zor (21–35), Zor (36–50).
+Her seviye çözücüyle kanıtlanmış çözülebilir (durum sınırına takılmadan), `par` gerçek en kısa çözümdür.
+Zorluk, simüle edilmiş "sıradan oyuncu" başarı oranı (bir tahmin, gerçek oyuncu verisi değil),
+en kısa çözüm uzunluğu ve çıkmaz durum yoğunluğu ile ayarlandı: `dart run tool/level_metrics.dart`.
 
 ## Oyun kuralları (özet)
 

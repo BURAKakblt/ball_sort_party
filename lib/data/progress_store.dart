@@ -37,8 +37,11 @@ class SharedPreferencesStore implements ProgressStore {
 ///   to fafe9d6. Fields were only ever added, so missing ones get defaults.
 /// - Schema 2 (key `player_progress`): adds `schema` and `processed`
 ///   (idempotency ids of completed purchases).
+/// - Schema 3: adds `starSigs` (layout signature each star record was earned
+///   on). Older star records have none → they are kept as "legacy" (the
+///   level stays cleared, coins are never paid again, a replay refreshes them).
 abstract final class SaveSchema {
-  static const current = 2;
+  static const current = 3;
   static const key = 'player_progress';
   static const legacyKey = 'player_progress_v1';
 
@@ -68,6 +71,10 @@ abstract final class SaveSchema {
     if (version < 2) {
       m['processed'] = <String>[];
       version = 2;
+    }
+    if (version < 3) {
+      m['starSigs'] = <String, String>{}; // all existing stars become legacy
+      version = 3;
     }
     m['schema'] = version;
     return m;

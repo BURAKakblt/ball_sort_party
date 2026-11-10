@@ -69,6 +69,13 @@ class PlayerProgress extends ChangeNotifier {
   int? _nextLifeAtMs;
   late int _unlockedLevel;
   late Map<int, int> _stars;
+
+  /// Layout signature each star record was earned on. Records from older
+  /// versions (or levels whose layout changed since) don't match the current
+  /// signature: they are kept as the player's history but count as "legacy"
+  /// and the next completion replaces them.
+  late Map<int, String> _starSigs;
+  static const legacyStarSig = 'legacy';
   late int _shuffles;
   late int _extraBottles;
   late int _undos;
@@ -92,6 +99,17 @@ class PlayerProgress extends ChangeNotifier {
   int get extraBottles => _extraBottles;
   int get undos => _undos;
   int starsFor(int level) => _stars[level] ?? 0;
+
+  /// Whether the level was ever cleared (any version): first-clear coins
+  /// are never paid again for it.
+  bool isCleared(int level) => (_stars[level] ?? 0) > 0;
+
+  /// True when the stars were earned on the level's CURRENT layout.
+  bool starsAreCurrent(int level) =>
+      isCleared(level) && _starSigs[level] == _currentSig(level);
+
+  static String? _currentSig(int level) =>
+      level >= 1 && level <= kLevels.length ? LevelRun.signatureOf(kLevels[level - 1].layout) : null;
   int get totalStars => _stars.values.fold(0, (a, b) => a + b);
   int get levelCount => kLevels.length;
 
@@ -283,10 +301,15 @@ class PlayerProgress extends ChangeNotifier {
   /// Records a win. Coins are paid only on the first clear of a level.
   /// Clears any saved / FAILED attempt for it. Returns the coins awarded.
   int completeLevel(int level, int stars) {
-    final best = _stars[level] ?? 0;
-    final firstClear = best == 0;
-    if (stars > best) _stars[level] = stars;
-    if (level >= _unlockedLevel) _unlockedLevel = level + 1;
+    stars = stars.clamp(1, 3);
+    final firstClear = !isCleared(level);
+    // Legacy records (earned on an older layout) are replaced; current ones
+    // only improve.
+    if (!starsAreCurrent(level) || stars > starsFor(level)) {
+      _stars[level] = stars;
+      _starSigs[level] = _currentSig(level) ?? legacyStarSig;
+    }
+    if (level >= _unlockedLevel) _unlockedLevel = min(level + 1, levelCount + 1);
     final reward = firstClear ? EconomyConfig.levelReward(level, levelCount) : 0;
     _coins += reward;
     _runs.remove(level);
@@ -437,25 +460,39 @@ class PlayerProgress extends ChangeNotifier {
 
   void _load() => _fromJson(SaveSchema.load(_store) ?? {});
 
+  /// Type-checked reads: a damaged field falls back to its default instead
+  /// of crashing the game.
   void _fromJson(Map<String, dynamic> m) {
-    int readInt(String k, int fallback) => max(0, (m[k] as num?)?.toInt() ?? fallback);
-    double readVol(String k) => ((m[k] as num?)?.toDouble() ?? 0.8).clamp(0, 1).toDouble();
+    T? pick<T>(String k) => m[k] is T ? m[k] as T : null;
+    int readInt(String k, int fallback) => max(0, pick<num>(k)?.toInt() ?? fallback);
+    double readVol(String k) => (pick<num>(k)?.toDouble() ?? 0.8).clamp(0, 1).toDouble();
 
     _coins = readInt('coins', EconomyConfig.startingCoins);
     _lives = readInt('lives', maxLives);
-    _nextLifeAtMs = (m['nextLifeAt'] as num?)?.toInt();
-    _unlockedLevel = max(1, readInt('unlocked', 1));
-    _stars = {
-      for (final e in (m['stars'] as Map<String, dynamic>? ?? {}).entries)
-        int.parse(e.key): (e.value as num).toInt(),
-    };
+    _nextLifeAtMs = pick<num>('nextLifeAt')?.toInt();
+    _unlockedLevel = readInt('unlocked', 1).clamp(1, kLevels.length + 1);
+    _stars = {};
+    _starSigs = {};
+    final sigs = pick<Map>('starSigs') ?? const {};
+    for (final e in (pick<Map>('stars') ?? const {}).entries) {
+      final level = int.tryParse('${e.key}');
+      final value = e.value is num ? (e.value as num).toInt() : null;
+      if (level == null || value == null || level < 1 || level > kLevels.length || value < 1) continue;
+      _stars[level] = value.clamp(1, 3);
+      final sig = sigs['$level'];
+      _starSigs[level] = sig is String ? sig : legacyStarSig;
+    }
+    // Never lock a level the player has already cleared.
+    for (final level in _stars.keys) {
+      if (level >= _unlockedLevel) _unlockedLevel = min(level + 1, kLevels.length + 1);
+    }
     _shuffles = readInt('shuffles', EconomyConfig.startingShuffles);
     _extraBottles = readInt('extraBottles', EconomyConfig.startingExtraBottles);
     _undos = readInt('undos', EconomyConfig.startingUndos);
-    _lastDailyClaim = m['dailyClaim'] as String?;
+    _lastDailyClaim = pick<String>('dailyClaim');
     _dailyStreak = readInt('dailyStreak', 0);
-    _lastGiftAtMs = (m['giftAt'] as num?)?.toInt();
-    _lastGiftId = m['giftId'] as String?;
+    _lastGiftAtMs = pick<num>('giftAt')?.toInt();
+    _lastGiftId = pick<String>('giftId');
     _runs = {};
     final runs = m['runs'];
     if (runs is Map) {
@@ -468,14 +505,14 @@ class PlayerProgress extends ChangeNotifier {
       }
     }
     _processed = [
-      for (final id in (m['processed'] as List? ?? const [])) '$id',
+      for (final id in (pick<List>('processed') ?? const [])) '$id',
     ];
-    soundOn = m['sound'] as bool? ?? true;
-    musicOn = m['music'] as bool? ?? true;
+    soundOn = pick<bool>('sound') ?? true;
+    musicOn = pick<bool>('music') ?? true;
     sfxVolume = readVol('sfxVolume');
     musicVolume = readVol('musicVolume');
-    hapticsOn = m['haptics'] as bool? ?? true;
-    reduceMotion = m['reduceMotion'] as bool? ?? false;
+    hapticsOn = pick<bool>('haptics') ?? true;
+    reduceMotion = pick<bool>('reduceMotion') ?? false;
   }
 
   /// Writes the whole save as one document (one key, one write).
@@ -514,6 +551,7 @@ class PlayerProgress extends ChangeNotifier {
         'nextLifeAt': _nextLifeAtMs,
         'unlocked': _unlockedLevel,
         'stars': {for (final e in _stars.entries) '${e.key}': e.value},
+        'starSigs': {for (final e in _starSigs.entries) '${e.key}': e.value},
         'shuffles': _shuffles,
         'extraBottles': _extraBottles,
         'undos': _undos,

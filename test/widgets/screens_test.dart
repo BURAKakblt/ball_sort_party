@@ -52,7 +52,7 @@ void main() {
     testWidgets('game screen renders @$tag', (tester) async {
       final p = await _progress();
       await _pump(tester, size, GameScreen(level: kLevels.last), p);
-      expect(find.text('BÖLÜM 10'), findsOneWidget);
+      expect(find.text('BÖLÜM ${kLevels.last.number}'), findsOneWidget);
       expect(find.text('Geri Al'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
