@@ -127,191 +127,197 @@ class _RescueOverlayState extends State<RescueOverlay>
         ? 'EKSTRA ŞİŞE KULLANILDI'
         : '${EconomyConfig.rescueWithCoinsPrice} ALTINLA KURTAR';
 
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: FadeTransition(
-            opacity: CurvedAnimation(
-              parent: _open,
-              curve: const Interval(0, 0.5),
+    return Material(
+      type: MaterialType.transparency,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: FadeTransition(
+              opacity: CurvedAnimation(
+                parent: _open,
+                curve: const Interval(0, 0.5),
+              ),
+              child: const ColoredBox(color: Color(0xC0070420)),
             ),
-            child: const ColoredBox(color: Color(0xC0070420)),
           ),
-        ),
-        Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(18),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: ScaleTransition(
-                scale: CurvedAnimation(
-                  parent: _open,
-                  curve: Curves.easeOutBack,
-                ),
-                child: GameCard(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        height: 120,
-                        child: AnimatedBuilder(
-                          animation: Listenable.merge([_break, _idle]),
-                          builder: (context, _) => _BreakingHeart(
-                            progress: _break.value,
-                            idle: _idle.value,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.pink.withValues(alpha: 0.25),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.pink, width: 1.5),
-                        ),
-                        child: const Text(
-                          'BAŞARISIZ',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 2,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        deadlock ? 'HAMLE KALMADI!' : 'ÇÖZÜM KALMADI!',
-                        textAlign: TextAlign.center,
-                        style: AppText.title.copyWith(fontSize: 28),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        deadlock ? 'Yapılabilecek geçerli bir aktarım yok.' : 'Hamle var ama bu dizilimden bölüm artık çözülemiyor.',
-                        textAlign: TextAlign.center,
-                        style: AppText.body.copyWith(fontSize: 14),
-                      ),
-                      const SizedBox(height: 12),
-                      const FittedBox(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            LivesChip(),
-                            SizedBox(width: 8),
-                            CoinsChip(),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _stagger(
-                        0,
-                        GameButton(
-                          label: p.undos > 0
-                              ? 'GERİ AL  (${p.undos})'
-                              : 'GERİ AL',
-                          icon: Icons.undo_rounded,
-                          height: 50,
-                          badge: widget.canUndo
-                              ? null
-                              : (p.undos == 0 ? 'HAK YOK' : null),
-                          onPressed: widget.canUndo
-                              ? () => _once(widget.onUndo)
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      _stagger(
-                        1,
-                        GameButton(
-                          label: coinLabel,
-                          icon: Icons.add_box_rounded,
-                          height: 50,
-                          palette: ButtonPalette.gold,
-                          onPressed: widget.canAddBottle && canAffordRescue
-                              ? () => widget
-                                    .onCoinRescue() // confirmation dialog first
-                              : null,
-                        ),
-                      ),
-                      if (widget.canAddBottle && !canAffordRescue)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            'Yeterli altının yok',
-                            style: AppText.body.copyWith(fontSize: 12),
-                          ),
-                        ),
-                      const SizedBox(height: 10),
-                      _stagger(
-                        2,
-                        GameButton(
-                          label: 'REKLAMLA KURTAR',
-                          icon: Icons.ondemand_video_rounded,
-                          height: 50,
-                          palette: ButtonPalette.purple,
-                          badge: widget.adReady ? null : 'YAKINDA',
-                          onPressed: widget.adReady && widget.canAddBottle
-                              ? () => _once(widget.onAdRescue)
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      _stagger(
-                        3,
-                        Row(
-                          children: [
-                            Expanded(
-                              child: p.hasLives
-                                  ? GameButton(
-                                      label: 'TEKRAR DENE',
-                                      icon: Icons.refresh_rounded,
-                                      height: 50,
-                                      fontSize: 15,
-                                      palette: ButtonPalette.pink,
-                                      onPressed: () => _once(widget.onRetry),
-                                    )
-                                  : GameButton(
-                                      label: 'CAN YOK',
-                                      icon: Icons.favorite_border_rounded,
-                                      height: 50,
-                                      fontSize: 15,
-                                      palette: ButtonPalette.pink,
-                                      onPressed: widget.onOutOfLives,
-                                    ),
+          Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(18),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 380),
+                child: ScaleTransition(
+                  scale: CurvedAnimation(
+                    parent: _open,
+                    curve: Curves.easeOutBack,
+                  ),
+                  child: GameCard(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          height: 120,
+                          child: AnimatedBuilder(
+                            animation: Listenable.merge([_break, _idle]),
+                            builder: (context, _) => _BreakingHeart(
+                              progress: _break.value,
+                              idle: _idle.value,
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: GameButton(
-                                label: 'ANA MENÜ',
-                                icon: Icons.home_rounded,
-                                height: 50,
-                                fontSize: 15,
-                                palette: ButtonPalette.navy,
-                                onPressed: () => _once(widget.onHome),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.pink.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppColors.pink,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: const Text(
+                            'BAŞARISIZ',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 2,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          deadlock ? 'HAMLE KALMADI!' : 'ÇÖZÜM KALMADI!',
+                          textAlign: TextAlign.center,
+                          style: AppText.title.copyWith(fontSize: 28),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          deadlock ? 'Yapılabilecek geçerli bir aktarım yok.' : 'Hamle var ama bu dizilimden bölüm artık çözülemiyor.',
+                          textAlign: TextAlign.center,
+                          style: AppText.body.copyWith(fontSize: 14),
+                        ),
+                        const SizedBox(height: 12),
+                        const FittedBox(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              LivesChip(),
+                              SizedBox(width: 8),
+                              CoinsChip(),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _stagger(
+                          0,
+                          GameButton(
+                            label: p.undos > 0
+                                ? 'GERİ AL  (${p.undos})'
+                                : 'GERİ AL',
+                            icon: Icons.undo_rounded,
+                            height: 50,
+                            badge: widget.canUndo
+                                ? null
+                                : (p.undos == 0 ? 'HAK YOK' : null),
+                            onPressed: widget.canUndo
+                                ? () => _once(widget.onUndo)
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        _stagger(
+                          1,
+                          GameButton(
+                            label: coinLabel,
+                            icon: Icons.add_box_rounded,
+                            height: 50,
+                            palette: ButtonPalette.gold,
+                            onPressed: widget.canAddBottle && canAffordRescue
+                                ? () => widget
+                                      .onCoinRescue() // confirmation dialog first
+                                : null,
+                          ),
+                        ),
+                        if (widget.canAddBottle && !canAffordRescue)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              'Yeterli altının yok',
+                              style: AppText.body.copyWith(fontSize: 12),
+                            ),
+                          ),
+                        const SizedBox(height: 10),
+                        _stagger(
+                          2,
+                          GameButton(
+                            label: 'REKLAMLA KURTAR',
+                            icon: Icons.ondemand_video_rounded,
+                            height: 50,
+                            palette: ButtonPalette.purple,
+                            badge: widget.adReady ? null : 'YAKINDA',
+                            onPressed: widget.adReady && widget.canAddBottle
+                                ? () => _once(widget.onAdRescue)
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        _stagger(
+                          3,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: p.hasLives
+                                    ? GameButton(
+                                        label: 'TEKRAR DENE',
+                                        icon: Icons.refresh_rounded,
+                                        height: 50,
+                                        fontSize: 15,
+                                        palette: ButtonPalette.pink,
+                                        onPressed: () => _once(widget.onRetry),
+                                      )
+                                    : GameButton(
+                                        label: 'CAN YOK',
+                                        icon: Icons.favorite_border_rounded,
+                                        height: 50,
+                                        fontSize: 15,
+                                        palette: ButtonPalette.pink,
+                                        onPressed: widget.onOutOfLives,
+                                      ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: GameButton(
+                                  label: 'ANA MENÜ',
+                                  icon: Icons.home_rounded,
+                                  height: 50,
+                                  fontSize: 15,
+                                  palette: ButtonPalette.navy,
+                                  onPressed: () => _once(widget.onHome),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        p.hasLives
-                            ? 'Bölüm başarısız olarak kaydedildi. Kurtarabilir ya da 1 can ile tekrar deneyebilirsin.'
-                            : 'Canın yok: kurtarabilir, bekleyebilir veya can alabilirsin.',
-                        textAlign: TextAlign.center,
-                        style: AppText.body.copyWith(fontSize: 12),
-                      ),
-                    ],
+                        const SizedBox(height: 8),
+                        Text(
+                          p.hasLives
+                              ? 'Bölüm başarısız olarak kaydedildi. Kurtarabilir ya da 1 can ile tekrar deneyebilirsin.'
+                              : 'Canın yok: kurtarabilir, bekleyebilir veya can alabilirsin.',
+                          textAlign: TextAlign.center,
+                          style: AppText.body.copyWith(fontSize: 12),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

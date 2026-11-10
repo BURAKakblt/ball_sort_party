@@ -395,7 +395,7 @@ class _DayDot extends StatelessWidget {
       ),
       child: claimed
           ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
-          : Text('$day', style: AppText.label.copyWith(fontSize: 11)),
+          : Text('$day', style: AppText.label.copyWith(fontSize: AppSizes.minText)),
     );
   }
 }

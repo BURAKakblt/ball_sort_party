@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/game_button.dart';
 import '../../core/widgets/resource_chips.dart';
@@ -40,7 +41,7 @@ class TopResourceBar extends StatelessWidget {
           const SizedBox(width: 8),
           RoundIconButton(
             icon: Icons.settings_rounded,
-            size: 44,
+            size: AppSizes.headerButton,
             palette: ButtonPalette.navy,
             tooltip: 'Ayarlar',
             onPressed: () => Navigator.of(context).push(GameRoute(const SettingsScreen())),

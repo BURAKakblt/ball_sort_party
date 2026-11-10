@@ -285,11 +285,10 @@ class BallSortGame extends FlameGame {
       ..completed = true
       ..celebrate();
     listener.onBottleCompleted?.call();
-    add(sparkleBurst(
-      Vector2(_rects[index].center.dx, _rects[index].top),
-      _d / 56,
-      count: reduceMotion() ? 8 : 26,
-    ));
+    final top = Vector2(_rects[index].center.dx, _rects[index].top);
+    if (reduceMotion()) return; // glow + cap only
+    add(ShockRing(center: top, maxRadius: _rects[index].width * 0.9));
+    add(sparkleBurst(top, _d / 56, count: 14));
   }
 
   void _dropSelection() {
@@ -312,10 +311,14 @@ class BallSortGame extends FlameGame {
       }
       if (_balls[i].isNotEmpty && !reduceMotion()) {
         final at = Vector2(_rects[i].center.dx, _rects[i].top);
+        final bottle = _bottles[i];
         add(TimerComponent(
           period: delay + 0.2,
           removeOnFinish: true,
-          onTick: () => add(sparkleBurst(at, _d / 56, count: 18)),
+          onTick: () {
+            bottle.celebrate(); // golden pulse travels across the board
+            add(sparkleBurst(at, _d / 56, count: 8));
+          },
         ));
       }
       delay += 0.09;

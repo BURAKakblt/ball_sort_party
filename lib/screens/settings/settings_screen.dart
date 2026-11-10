@@ -41,7 +41,7 @@ class SettingsScreen extends StatelessWidget {
                 children: [
                   RoundIconButton(
                     icon: Icons.arrow_back_rounded,
-                    size: 46,
+                    size: AppSizes.headerButton,
                     palette: ButtonPalette.navy,
                     tooltip: 'Geri',
                     onPressed: () => Navigator.of(context).pop(),

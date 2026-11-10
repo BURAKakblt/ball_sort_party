@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flame/components.dart';
 import 'package:flame/particles.dart';
+import 'package:flutter/animation.dart';
 
 const _palette = [
   Color(0xFFFFE27A),
@@ -54,4 +55,35 @@ ParticleSystemComponent sparkleBurst(Vector2 at, double scale, {int count = 26})
       },
     ),
   );
+}
+
+/// Expanding golden ring: a cheap, readable "bottle complete" accent
+/// (one stroke per frame instead of many particles).
+class ShockRing extends PositionComponent {
+  ShockRing({required Vector2 center, required this.maxRadius, this.color = const Color(0xFFFFD45C)})
+    : super(position: center, priority: 30, anchor: Anchor.center);
+
+  final double maxRadius;
+  final Color color;
+  double _t = 0;
+  static const _duration = 0.55;
+
+  @override
+  void update(double dt) {
+    _t += dt / _duration;
+    if (_t >= 1) removeFromParent();
+  }
+
+  @override
+  void render(Canvas canvas) {
+    final k = Curves.easeOutCubic.transform(_t.clamp(0, 1));
+    canvas.drawCircle(
+      Offset.zero,
+      maxRadius * (0.35 + 0.65 * k),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = maxRadius * 0.12 * (1 - k) + 1
+        ..color = color.withValues(alpha: (1 - k) * 0.9),
+    );
+  }
 }

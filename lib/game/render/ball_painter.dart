@@ -139,8 +139,9 @@ abstract final class BallArt {
       r,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1, r * 0.04)
-        ..color = spec.dark.withValues(alpha: 0.8),
+        // Crisp edge so light balls stand out against glass and background.
+        ..strokeWidth = math.max(1.2, r * 0.055)
+        ..color = spec.dark.withValues(alpha: 0.95),
     );
   }
 
@@ -285,7 +286,7 @@ abstract final class BallArt {
             ..moveTo(at(a + 0.25, r * s).dx, at(a + 0.25, r * s).dy)
             ..quadraticBezierTo(at(a + 0.9, r * (s + 0.25)).dx, at(a + 0.9, r * (s + 0.25)).dy,
                 at(a + 0.2, r * 1.3).dx, at(a + 0.2, r * 1.3).dy),
-          _stroke(const Color(0x401B2D6B), r * 0.03),
+          _stroke(const Color(0x661B2D6B), r * 0.035),
         );
       }
       canvas.drawPath(

@@ -58,7 +58,12 @@ class _GameScreenState extends State<GameScreen> {
       },
       onBallLanded: _audio.playLand,
       onBottleCompleted: () => _audio.play(Sfx.bottleComplete),
-      onWinStarted: _monitor.invalidate,
+      onWinStarted: () {
+        _monitor.invalidate();
+        // Jingle starts with the on-board celebration (hops + sparkles),
+        // not ~1.5 s later when the result card appears.
+        _audio.play(Sfx.win);
+      },
       onSolved: _onSolved,
       onSettled: _checkFailure,
     ),
@@ -116,7 +121,6 @@ class _GameScreenState extends State<GameScreen> {
   void _onSolved() {
     final stars = widget.level.starsFor(_engine.moveCount);
     final coins = _session.complete(stars); // PLAYING → COMPLETED, once
-    _audio.play(Sfx.win);
     if (coins > 0) Future.delayed(const Duration(milliseconds: 900), () => _audio.play(Sfx.coin));
     setState(() {
       _won = true;
@@ -487,7 +491,7 @@ class _Hud extends StatelessWidget {
         children: [
           RoundIconButton(
             icon: Icons.pause_rounded,
-            size: 48,
+            size: AppSizes.headerButton,
             palette: ButtonPalette.navy,
             tooltip: 'Duraklat',
             onPressed: onPause,
@@ -515,7 +519,7 @@ class _Hud extends StatelessWidget {
           ),
           RoundIconButton(
             icon: Icons.settings_rounded,
-            size: 48,
+            size: AppSizes.headerButton,
             palette: ButtonPalette.navy,
             tooltip: 'Ayarlar',
             onPressed: onSettings,

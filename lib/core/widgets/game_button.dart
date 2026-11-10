@@ -5,6 +5,7 @@ import '../../app.dart';
 import '../../audio/audio_service.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import 'pressable.dart';
 
 /// Big, rounded, layered button that sinks into its depth edge when pressed.
 class GameButton extends StatefulWidget {
@@ -150,7 +151,12 @@ class _GameButtonState extends State<GameButton> {
         ),
       ),
     );
-    return Semantics(button: true, label: widget.label, enabled: enabled, child: button);
+    return Semantics(
+      button: true,
+      label: widget.label,
+      enabled: enabled,
+      child: PressScale(enabled: enabled, depth: 0.03, child: button),
+    );
   }
 }
 
@@ -244,9 +250,10 @@ class _RoundIconButtonState extends State<RoundIconButton> {
                 constraints: BoxConstraints(minWidth: s * 0.38),
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
-                  color: AppColors.pink,
+                  // A count on a disabled button is information, not an alert.
+                  color: enabled ? AppColors.pink : const Color(0xFF6E6A94),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white, width: 1.5),
+                  border: Border.all(color: Colors.white.withValues(alpha: enabled ? 1 : 0.6), width: 1.5),
                 ),
                 child: Text(
                   widget.count!,
@@ -285,7 +292,7 @@ class _RoundIconButtonState extends State<RoundIconButton> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: AppText.label.copyWith(
-                fontSize: 11,
+                fontSize: AppSizes.minText,
                 color: enabled ? AppColors.text : AppColors.textDim,
               ),
             ),
@@ -300,7 +307,7 @@ class _RoundIconButtonState extends State<RoundIconButton> {
       button: true,
       label: widget.caption ?? widget.tooltip,
       enabled: enabled,
-      child: result,
+      child: PressScale(enabled: enabled, depth: 0.07, child: result),
     );
   }
 }

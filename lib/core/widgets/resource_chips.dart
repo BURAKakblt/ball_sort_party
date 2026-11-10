@@ -110,7 +110,7 @@ class ResourcePill extends StatelessWidget {
                   Text(
                     subtitle!,
                     style: AppText.label.copyWith(
-                      fontSize: 10,
+                      fontSize: 11,
                       color: AppColors.textMuted,
                       height: 1.05,
                     ),

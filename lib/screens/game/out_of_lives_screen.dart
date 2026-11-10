@@ -75,7 +75,7 @@ class _OutOfLivesScreenState extends State<OutOfLivesScreen> {
                           padding: const EdgeInsets.only(top: 8),
                           child: RoundIconButton(
                             icon: Icons.close_rounded,
-                            size: 46,
+                            size: AppSizes.headerButton,
                             palette: ButtonPalette.navy,
                             tooltip: 'Kapat',
                             onPressed: () => Navigator.of(context).pop(),

@@ -8,6 +8,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/backgrounds.dart';
 import '../../core/widgets/game_button.dart';
 import '../../core/widgets/game_dialog.dart';
+import '../../core/widgets/pressable.dart';
 import '../../core/widgets/resource_chips.dart';
 import '../../data/player_progress.dart';
 import '../../game/levels/level_data.dart';
@@ -30,7 +31,9 @@ class _LevelsScreenState extends State<LevelsScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToCurrent(animate: false));
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _scrollToCurrent(animate: false),
+    );
   }
 
   @override
@@ -46,7 +49,9 @@ class _LevelsScreenState extends State<LevelsScreen> {
     for (var i = 0; i < 40 && _currentKey.currentContext == null; i++) {
       final pos = _scroll.position;
       if (pos.pixels >= pos.maxScrollExtent) break;
-      _scroll.jumpTo((pos.pixels + pos.viewportDimension).clamp(0, pos.maxScrollExtent));
+      _scroll.jumpTo(
+        (pos.pixels + pos.viewportDimension).clamp(0, pos.maxScrollExtent),
+      );
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
     }
@@ -78,11 +83,16 @@ class _LevelsScreenState extends State<LevelsScreen> {
         controller: _scroll,
         slivers: [
           const SliverToBoxAdapter(child: TopResourceBar()),
-          const SliverToBoxAdapter(child: ScreenTitle('Seviyeler', icon: Icons.grid_view_rounded)),
+          const SliverToBoxAdapter(
+            child: ScreenTitle('Seviyeler', icon: Icons.grid_view_rounded),
+          ),
           SliverToBoxAdapter(
             child: _ProgressCard(
               current: current,
-              cleared: [for (var n = 1; n <= kLevels.length; n++) if (p.isCleared(n)) n].length,
+              cleared: [
+                for (var n = 1; n <= kLevels.length; n++)
+                  if (p.isCleared(n)) n,
+              ].length,
               stars: p.totalStars,
               allDone: p.unlockedLevel > kLevels.length,
               onContinue: () => startLevel(context, current),
@@ -90,7 +100,9 @@ class _LevelsScreenState extends State<LevelsScreen> {
             ),
           ),
           for (final band in LevelBand.values) ...[
-            SliverToBoxAdapter(child: _BandHeader(band: band, progress: p)),
+            SliverToBoxAdapter(
+              child: _BandHeader(band: band, progress: p),
+            ),
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               sliver: SliverGrid(
@@ -104,7 +116,8 @@ class _LevelsScreenState extends State<LevelsScreen> {
                   childCount: band.last - band.first + 1,
                   (context, i) {
                     final n = band.first + i;
-                    final isCurrent = n == current && p.unlockedLevel <= kLevels.length;
+                    final isCurrent =
+                        n == current && p.unlockedLevel <= kLevels.length;
                     return _Appear(
                       index: i,
                       enabled: !p.reduceMotion,
@@ -131,9 +144,18 @@ class _LevelsScreenState extends State<LevelsScreen> {
               child: GlassPanel(
                 child: Row(
                   children: [
-                    Icon(Icons.rocket_launch_rounded, color: AppColors.turquoise, size: 34),
+                    Icon(
+                      Icons.rocket_launch_rounded,
+                      color: AppColors.turquoise,
+                      size: 34,
+                    ),
                     SizedBox(width: 12),
-                    Expanded(child: Text('Yeni bölümler ve dünyalar hazırlanıyor.', style: AppText.label)),
+                    Expanded(
+                      child: Text(
+                        'Yeni bölümler ve dünyalar hazırlanıyor.',
+                        style: AppText.label,
+                      ),
+                    ),
                     SoonBadge(),
                   ],
                 ),
@@ -178,7 +200,10 @@ class _ProgressCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('$cleared / $total bölüm', style: AppText.label.copyWith(fontSize: 15)),
+                      Text(
+                        '$cleared / $total bölüm',
+                        style: AppText.label.copyWith(fontSize: 15),
+                      ),
                       const SizedBox(height: 6),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
@@ -186,7 +211,9 @@ class _ProgressCard extends StatelessWidget {
                           value: cleared / total,
                           minHeight: 10,
                           backgroundColor: Colors.white12,
-                          valueColor: const AlwaysStoppedAnimation(AppColors.turquoise),
+                          valueColor: const AlwaysStoppedAnimation(
+                            AppColors.turquoise,
+                          ),
                         ),
                       ),
                     ],
@@ -249,7 +276,14 @@ class _BandHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 22, 20, 10),
       child: Row(
         children: [
-          Container(width: 6, height: 26, decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(3))),
+          Container(
+            width: 6,
+            height: 26,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: FittedBox(
@@ -258,8 +292,18 @@ class _BandHeader extends StatelessWidget {
               child: Text.rich(
                 TextSpan(
                   children: [
-                    TextSpan(text: band.label.toUpperCase(), style: AppText.label.copyWith(fontSize: 16, color: accent, letterSpacing: 1)),
-                    TextSpan(text: '   ${band.first}–${band.last}', style: AppText.body.copyWith(fontSize: 13)),
+                    TextSpan(
+                      text: band.label.toUpperCase(),
+                      style: AppText.label.copyWith(
+                        fontSize: 16,
+                        color: accent,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    TextSpan(
+                      text: '   ${band.first}–${band.last}',
+                      style: AppText.body.copyWith(fontSize: 13),
+                    ),
                   ],
                 ),
               ),
@@ -269,7 +313,10 @@ class _BandHeader extends StatelessWidget {
             const Icon(Icons.lock_rounded, color: AppColors.textDim, size: 18)
           else ...[
             const Icon(Icons.star_rounded, color: AppColors.gold, size: 18),
-            Text(' $stars/${levels.length * 3}', style: AppText.label.copyWith(fontSize: 12)),
+            Text(
+              ' $stars/${levels.length * 3}',
+              style: AppText.label.copyWith(fontSize: 12),
+            ),
           ],
         ],
       ),
@@ -279,7 +326,11 @@ class _BandHeader extends StatelessWidget {
 
 /// Staggered fade + scale-in for grid tiles.
 class _Appear extends StatelessWidget {
-  const _Appear({required this.index, required this.enabled, required this.child});
+  const _Appear({
+    required this.index,
+    required this.enabled,
+    required this.child,
+  });
 
   final int index;
   final bool enabled;
@@ -329,7 +380,8 @@ class _LevelTile extends StatefulWidget {
   State<_LevelTile> createState() => _LevelTileState();
 }
 
-class _LevelTileState extends State<_LevelTile> with SingleTickerProviderStateMixin {
+class _LevelTileState extends State<_LevelTile>
+    with SingleTickerProviderStateMixin {
   AnimationController? _pulse;
 
   @override
@@ -347,7 +399,10 @@ class _LevelTileState extends State<_LevelTile> with SingleTickerProviderStateMi
   /// Only the current tile pulses.
   void _syncPulse() {
     if (widget.current && widget.animate) {
-      _pulse ??= AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat(reverse: true);
+      _pulse ??= AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1200),
+      )..repeat(reverse: true);
     } else {
       _pulse?.dispose();
       _pulse = null;
@@ -392,17 +447,27 @@ class _LevelTileState extends State<_LevelTile> with SingleTickerProviderStateMi
                   end: Alignment.bottomCenter,
                   colors: [palette.top, palette.bottom],
                 ),
-                border: Border.all(color: Colors.white.withValues(alpha: w.current ? 0.9 : 0.4), width: w.current ? 2.5 : 1.5),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: w.current ? 0.9 : 0.4),
+                  width: w.current ? 2.5 : 1.5,
+                ),
               ),
               alignment: Alignment.center,
               child: w.unlocked
                   ? FittedBox(
                       child: Padding(
                         padding: const EdgeInsets.all(6),
-                        child: Text('${w.number}', style: AppText.title.copyWith(fontSize: 30)),
+                        child: Text(
+                          '${w.number}',
+                          style: AppText.title.copyWith(fontSize: 30),
+                        ),
                       ),
                     )
-                  : const Icon(Icons.lock_rounded, size: 26, color: Color(0xFFC9C6E4)),
+                  : const Icon(
+                      Icons.lock_rounded,
+                      size: 26,
+                      color: Color(0xFFC9C6E4),
+                    ),
             ),
           ),
         ),
@@ -418,7 +483,9 @@ class _LevelTileState extends State<_LevelTile> with SingleTickerProviderStateMi
                     Icons.star_rounded,
                     size: 18,
                     color: i < w.stars
-                        ? (w.legacyStars ? AppColors.gold.withValues(alpha: 0.5) : AppColors.gold)
+                        ? (w.legacyStars
+                              ? AppColors.gold.withValues(alpha: 0.5)
+                              : AppColors.gold)
                         : const Color(0x40FFFFFF),
                   ),
               ],
@@ -436,7 +503,9 @@ class _LevelTileState extends State<_LevelTile> with SingleTickerProviderStateMi
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: AppColors.turquoise.withValues(alpha: 0.25 + 0.35 * pulse.value),
+                color: AppColors.turquoise.withValues(
+                  alpha: 0.25 + 0.35 * pulse.value,
+                ),
                 blurRadius: 10 + 10 * pulse.value,
               ),
             ],
@@ -452,26 +521,37 @@ class _LevelTileState extends State<_LevelTile> with SingleTickerProviderStateMi
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: w.onTap,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned.fill(child: tile),
-            if (w.failed)
-              const Positioned(
-                right: -4,
-                top: -6,
-                child: Tooltip(message: 'Başarısız — yeniden başlatmak 1 can', child: HeartIcon(size: 24, broken: true)),
-              )
-            else if (w.legacyStars)
-              const Positioned(
-                right: -4,
-                top: -6,
-                child: Tooltip(
-                  message: 'Bölüm güncellendi — yıldızları yenilemek için tekrar oyna',
-                  child: Icon(Icons.autorenew_rounded, size: 20, color: AppColors.gold),
+        child: PressScale(
+          enabled: w.unlocked,
+          depth: 0.06,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned.fill(child: tile),
+              if (w.failed)
+                const Positioned(
+                  right: -4,
+                  top: -6,
+                  child: Tooltip(
+                    message: 'Başarısız — yeniden başlatmak 1 can',
+                    child: HeartIcon(size: 24, broken: true),
+                  ),
+                )
+              else if (w.legacyStars)
+                const Positioned(
+                  right: -4,
+                  top: -6,
+                  child: Tooltip(
+                    message: 'Bölüm güncellendi — yıldızları yenilemek için tekrar oyna',
+                    child: Icon(
+                      Icons.autorenew_rounded,
+                      size: 20,
+                      color: AppColors.gold,
+                    ),
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

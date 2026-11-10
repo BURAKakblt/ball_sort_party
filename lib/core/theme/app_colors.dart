@@ -23,7 +23,7 @@ abstract final class AppColors {
   // Text
   static const text = Colors.white;
   static const textMuted = Color(0xFFB9B4EA);
-  static const textDim = Color(0xFF8079C0);
+  static const textDim = Color(0xFF9A94D6); // ≥ 4.5:1 on the navy panels
 
   static const backgroundGradient = LinearGradient(
     begin: Alignment.topCenter,

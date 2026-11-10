@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app.dart';
+
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/widgets/backgrounds.dart';
+import '../../core/widgets/pressable.dart';
 import '../collection/collection_screen.dart';
 import '../levels/levels_screen.dart';
 import '../shop/shop_screen.dart';
@@ -29,6 +33,7 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
+    final reduced = AppScope.of(context).reduceMotion;
     final pages = {
       ShellTab.shop: const ShopScreen(),
       ShellTab.levels: const LevelsScreen(),
@@ -41,7 +46,18 @@ class _MainShellState extends State<MainShell> {
           children: [
             Expanded(
               child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
+                duration: Duration(milliseconds: reduced ? 120 : 260),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, animation) => reduced
+                    ? FadeTransition(opacity: animation, child: child)
+                    : FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(
+                          position: Tween(begin: const Offset(0, 0.025), end: Offset.zero).animate(animation),
+                          child: child,
+                        ),
+                      ),
                 child: KeyedSubtree(key: ValueKey(_tab), child: pages[_tab]!),
               ),
             ),
@@ -78,8 +94,19 @@ class _BottomNav extends StatelessWidget {
           colors: [Color(0xFF2E2280), Color(0xFF17124A)],
         ),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
-        border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.18), width: 1.5)),
-        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 16, offset: Offset(0, -4))],
+        border: Border(
+          top: BorderSide(
+            color: Colors.white.withValues(alpha: 0.18),
+            width: 1.5,
+          ),
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 16,
+            offset: Offset(0, -4),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -99,7 +126,12 @@ class _BottomNav extends StatelessWidget {
 }
 
 class _NavItem extends StatelessWidget {
-  const _NavItem({required this.icon, required this.label, required this.active, required this.onTap});
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
 
   final IconData icon;
   final String label;
@@ -115,45 +147,56 @@ class _NavItem extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutBack,
-          margin: const EdgeInsets.symmetric(horizontal: 3),
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            gradient: active
-                ? const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFF5CF5E2), Color(0xFF14B8C9)],
-                  )
-                : null,
-            boxShadow: active
-                ? [BoxShadow(color: AppColors.turquoise.withValues(alpha: 0.45), blurRadius: 14)]
-                : null,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedScale(
-                scale: active ? 1.15 : 1,
-                duration: const Duration(milliseconds: 220),
-                child: Icon(icon, size: 26, color: active ? Colors.white : AppColors.textMuted),
-              ),
-              const SizedBox(height: 2),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
+        child: PressScale(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutBack,
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              gradient: active
+                  ? const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0xFF5CF5E2), Color(0xFF14B8C9)],
+                    )
+                  : null,
+              boxShadow: active
+                  ? [
+                      BoxShadow(
+                        color: AppColors.turquoise.withValues(alpha: 0.45),
+                        blurRadius: 14,
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedScale(
+                  scale: active ? 1.15 : 1,
+                  duration: const Duration(milliseconds: 220),
+                  child: Icon(
+                    icon,
+                    size: 26,
                     color: active ? Colors.white : AppColors.textMuted,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: AppSizes.minText,
+                      fontWeight: FontWeight.w800,
+                      color: active ? Colors.white : AppColors.textMuted,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

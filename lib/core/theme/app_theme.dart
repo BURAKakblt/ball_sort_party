@@ -77,3 +77,17 @@ abstract final class AppText {
     color: AppColors.text,
   );
 }
+
+/// Shared sizes so icons and header buttons look the same on every screen.
+abstract final class AppSizes {
+  /// Round buttons in screen headers / top bars.
+  static const headerButton = 46.0;
+
+  /// Inline icon sizes.
+  static const iconSm = 18.0;
+  static const iconMd = 24.0;
+  static const iconLg = 30.0;
+
+  /// Smallest text size used anywhere (readability).
+  static const minText = 12.0;
+}
